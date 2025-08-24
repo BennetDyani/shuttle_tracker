@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:shuttle_tracker/screens/authentication/login_screen.dart';
+import 'package:shuttle_tracker/screens/authentication/register_screen.dart';
 //import 'package:firebase_core/firebase_core.dart'; // Import Firebase Core
 //import 'package:authentication_app/auth_screen.dart';
 import 'package:shuttle_tracker/screens/home_screen.dart';
+import 'package:shuttle_tracker/screens/admin/admin_home_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -20,7 +23,7 @@ class MyApp extends StatelessWidget {
 
         primarySwatch: Colors.blue,
       ),
-      home: const HomeScreen(), // HomeScreen as the home widget
+      home: const LoginScreen(), // HomeScreen as the home widget
     );
   }
 }
