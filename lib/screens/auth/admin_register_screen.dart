@@ -277,6 +277,7 @@ class _AdminRegisterScreenState extends State<AdminRegisterScreen> {
         );
       }
     }
+
   }
 
   @override
