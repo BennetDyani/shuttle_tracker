@@ -66,7 +66,8 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
                   prefixIcon: const Icon(Icons.lock),
                   suffixIcon: IconButton(
                     icon: Icon(
-                      _obscurePassword ? Icons.visibility : Icons.visibility_off,
+                      _obscurePassword ? Icons.visibility : Icons
+                          .visibility_off,
                     ),
                     onPressed: () {
                       setState(() {
@@ -116,10 +117,8 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
         ),
       ),
     );
-
   }
 
-  
   Future<void> _login() async {
     if (_formKey.currentState!.validate()) {
       setState(() {
