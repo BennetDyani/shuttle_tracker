@@ -104,6 +104,13 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
                 },
                 child: const Text('Student Login'),
               ),
+              const SizedBox(height: 15),
+              TextButton(
+                onPressed: () {
+                  Navigator.pushNamed(context, '/admin/register');
+                },
+                child: const Text('Need admin access? Register here'),
+              ),
             ],
           ),
         ),
