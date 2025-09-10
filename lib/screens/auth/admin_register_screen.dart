@@ -671,6 +671,8 @@ class _AdminRegisterScreenState extends State<AdminRegisterScreen> {
         setState(() {
           _isLoading = false;
         });
+
+
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Error: ${e.toString()}')),
         );
