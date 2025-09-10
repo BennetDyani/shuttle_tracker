@@ -14,12 +14,13 @@ class LoginScreen extends StatefulWidget {
 class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
   bool _passwordVisible = false;
-  final TextEditingController _emailController = TextEditingController(); // Added email controller
+  final TextEditingController _emailController = TextEditingController();
 
-  // Regular expressions for email validation
   final RegExp _studentEmailRegex = RegExp(r'^[0-9]{9}@mycput\.ac\.za$');
-  final RegExp _driverEmailRegex = RegExp(r'^[a-zA-Z\s]+@hgscput\.driver\.co\.za$');
-  final RegExp _adminEmailRegex = RegExp(r'^[a-zA-Z0-9]+@hgscput\.admin\.co\.za$');
+  final RegExp _driverEmailRegex = RegExp(
+      r'^[a-zA-Z\s]+@hgscput\.driver\.co\.za$');
+  final RegExp _adminEmailRegex = RegExp(
+      r'^[a-zA-Z0-9]+@hgscput\.admin\.co\.za$');
 
   void _handleLogin() {
     if (_formKey.currentState!.validate()) {
@@ -31,7 +32,7 @@ class _LoginScreenState extends State<LoginScreen> {
           context,
           MaterialPageRoute(builder: (context) => const StudentHomeScreen()),
         );
-       }// else if (_driverEmailRegex.hasMatch(email)) {
+      } // else if (_driverEmailRegex.hasMatch(email)) {
       //   Navigator.pushReplacement(
       //     context,
       //     MaterialPageRoute(builder: (context) => const DriverHomeScreen()),
@@ -43,7 +44,6 @@ class _LoginScreenState extends State<LoginScreen> {
           MaterialPageRoute(builder: (context) => const AdminHomeScreen()),
         );
       } else {
-        // Optional: Show an error if email format doesn't match any known type
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Unknown email format or user type.')),
         );
@@ -90,7 +90,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
                 const SizedBox(height: 8),
                 TextFormField(
-                  controller: _emailController, // Assigned controller
+                  controller: _emailController,
                   decoration: InputDecoration(
                     hintText: 'Enter your email',
                     border: OutlineInputBorder(
@@ -99,7 +99,10 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                     focusedBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(8.0),
-                      borderSide: const BorderSide(color: Colors.black),
+                      borderSide: BorderSide(color: Theme
+                          .of(context)
+                          .colorScheme
+                          .primary), // Use theme color
                     ),
                   ),
                   keyboardType: TextInputType.emailAddress,
@@ -107,7 +110,6 @@ class _LoginScreenState extends State<LoginScreen> {
                     if (value == null || value.isEmpty) {
                       return 'Please enter your email';
                     }
-                    // Basic check, detailed regex check happens on login
                     if (!value.contains('@')) {
                       return 'Please enter a valid email';
                     }
@@ -130,11 +132,15 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                     focusedBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(8.0),
-                      borderSide: const BorderSide(color: Colors.black),
+                      borderSide: BorderSide(color: Theme
+                          .of(context)
+                          .colorScheme
+                          .primary), // Use theme color
                     ),
                     suffixIcon: IconButton(
                       icon: Icon(
-                        _passwordVisible ? Icons.visibility : Icons.visibility_off,
+                        _passwordVisible ? Icons.visibility : Icons
+                            .visibility_off,
                         color: Colors.grey,
                       ),
                       onPressed: () {
@@ -159,23 +165,38 @@ class _LoginScreenState extends State<LoginScreen> {
                       // TODO: Implement Forgot Password
                       print('Forgot Password tapped');
                     },
-                    child: const Text(
+                    child: Text(
                       'Forgot Password?',
-                      style: TextStyle(color: Colors.blue),
+                      style: TextStyle(color: Theme
+                          .of(context)
+                          .colorScheme
+                          .primary), // Use theme color
                     ),
                   ),
                 ),
                 const SizedBox(height: 30),
                 ElevatedButton(
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.black,
+                    backgroundColor: Theme
+                        .of(context)
+                        .colorScheme
+                        .primary, // Use theme color
                     padding: const EdgeInsets.symmetric(vertical: 16.0),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(8.0),
                     ),
                   ),
-                  onPressed: _handleLogin, // Updated onPressed
-                  child: const Text('Login', style: TextStyle(fontSize: 16, color: Colors.white)),
+                  onPressed: _handleLogin,
+                  child: Text(
+                    'Login',
+                    style: TextStyle(
+                      fontSize: 16,
+                      color: Theme
+                          .of(context)
+                          .colorScheme
+                          .onPrimary, // Use theme color for text on primary
+                    ),
+                  ),
                 ),
                 const SizedBox(height: 30),
                 const Row(
@@ -190,8 +211,9 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
                 const SizedBox(height: 30),
                 OutlinedButton.icon(
-                  icon: const Icon(Icons.g_mobiledata, color: Colors.black), // Placeholder for Google G
-                  label: const Text('Continue with Google', style: TextStyle(color: Colors.black)),
+                  icon: const Icon(Icons.g_mobiledata, color: Colors.black),
+                  label: const Text('Continue with Google',
+                      style: TextStyle(color: Colors.black)),
                   style: OutlinedButton.styleFrom(
                     padding: const EdgeInsets.symmetric(vertical: 12.0),
                     side: const BorderSide(color: Colors.grey),
@@ -206,8 +228,9 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
                 const SizedBox(height: 15),
                 OutlinedButton.icon(
-                  icon: const Icon(Icons.window, color: Colors.black), // Placeholder for Microsoft logo
-                  label: const Text('Continue with Microsoft', style: TextStyle(color: Colors.black)),
+                  icon: const Icon(Icons.window, color: Colors.black),
+                  label: const Text('Continue with Microsoft',
+                      style: TextStyle(color: Colors.black)),
                   style: OutlinedButton.styleFrom(
                     padding: const EdgeInsets.symmetric(vertical: 12.0),
                     side: const BorderSide(color: Colors.grey),
@@ -224,15 +247,23 @@ class _LoginScreenState extends State<LoginScreen> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: <Widget>[
-                    const Text("Don\'t have an account?", style: TextStyle(color: Colors.grey)),
+                    const Text("Don\'t have an account?",
+                        style: TextStyle(color: Colors.grey)),
                     TextButton(
                       onPressed: () {
                         Navigator.pushReplacement(
                           context,
-                          MaterialPageRoute(builder: (context) => const RegisterScreen()),
+                          MaterialPageRoute(builder: (
+                              context) => const RegisterScreen()),
                         );
                       },
-                      child: const Text('Create Account', style: TextStyle(color: Colors.black)),
+                      child: Text(
+                        'Create Account',
+                        style: TextStyle(color: Theme
+                            .of(context)
+                            .colorScheme
+                            .primary), // Use theme color
+                      ),
                     ),
                   ],
                 ),

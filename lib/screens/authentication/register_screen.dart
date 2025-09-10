@@ -56,7 +56,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
         break;
     }
     if (!value.contains('@')) { // Basic check, though regex handles specifics
-        return 'Please enter a valid email';
+      return 'Please enter a valid email';
     }
     return null;
   }
@@ -102,7 +102,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     ),
                     focusedBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(8.0),
-                      borderSide: const BorderSide(color: Colors.black),
+                      borderSide: BorderSide(color: Theme
+                          .of(context)
+                          .colorScheme
+                          .primary), // Use theme color
                     ),
                   ),
                   validator: (value) {
@@ -127,14 +130,18 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     ),
                     focusedBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(8.0),
-                      borderSide: const BorderSide(color: Colors.black),
+                      borderSide: BorderSide(color: Theme
+                          .of(context)
+                          .colorScheme
+                          .primary), // Use theme color
                     ),
                   ),
                   value: _selectedUserType,
                   items: UserType.values.map((UserType type) {
                     return DropdownMenuItem<UserType>(
                       value: type,
-                      child: Text(type.name[0].toUpperCase() + type.name.substring(1)), // Capitalize first letter
+                      child: Text(type.name[0].toUpperCase() +
+                          type.name.substring(1)), // Capitalize first letter
                     );
                   }).toList(),
                   onChanged: (UserType? newValue) {
@@ -142,7 +149,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       _selectedUserType = newValue;
                     });
                   },
-                  validator: (value) => value == null ? 'Please select a user type' : null,
+                  validator: (value) =>
+                  value == null
+                      ? 'Please select a user type'
+                      : null,
                 ),
                 const SizedBox(height: 20),
                 const Text(
@@ -160,7 +170,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     ),
                     focusedBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(8.0),
-                      borderSide: const BorderSide(color: Colors.black),
+                      borderSide: BorderSide(color: Theme
+                          .of(context)
+                          .colorScheme
+                          .primary), // Use theme color
                     ),
                   ),
                   keyboardType: TextInputType.emailAddress,
@@ -182,11 +195,15 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     ),
                     focusedBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(8.0),
-                      borderSide: const BorderSide(color: Colors.black),
+                      borderSide: BorderSide(color: Theme
+                          .of(context)
+                          .colorScheme
+                          .primary), // Use theme color
                     ),
                     suffixIcon: IconButton(
                       icon: Icon(
-                        _passwordVisible ? Icons.visibility : Icons.visibility_off,
+                        _passwordVisible ? Icons.visibility : Icons
+                            .visibility_off,
                         color: Colors.grey,
                       ),
                       onPressed: () {
@@ -225,11 +242,15 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     ),
                     focusedBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(8.0),
-                      borderSide: const BorderSide(color: Colors.black),
+                      borderSide: BorderSide(color: Theme
+                          .of(context)
+                          .colorScheme
+                          .primary), // Use theme color
                     ),
                     suffixIcon: IconButton(
                       icon: Icon(
-                        _confirmPasswordVisible ? Icons.visibility : Icons.visibility_off,
+                        _confirmPasswordVisible ? Icons.visibility : Icons
+                            .visibility_off,
                         color: Colors.grey,
                       ),
                       onPressed: () {
@@ -254,6 +275,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   children: <Widget>[
                     Checkbox(
                       value: _agreeToTerms,
+                      activeColor: Theme
+                          .of(context)
+                          .colorScheme
+                          .primary, // Use theme color
                       onChanged: (bool? value) {
                         setState(() {
                           _agreeToTerms = value!;
@@ -264,17 +289,30 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       child: RichText(
                         text: TextSpan(
                           text: 'I agree to the ',
-                          style: DefaultTextStyle.of(context).style.copyWith(color: Colors.black87),
+                          style: DefaultTextStyle
+                              .of(context)
+                              .style
+                              .copyWith(color: Colors.black87),
                           children: <TextSpan>[
                             TextSpan(
                               text: 'Terms',
-                              style: const TextStyle(color: Colors.blue, decoration: TextDecoration.underline),
+                              style: TextStyle(color: Theme
+                                  .of(context)
+                                  .colorScheme
+                                  .primary,
+                                  decoration: TextDecoration
+                                      .underline), // Use theme color
                               // TODO: Add onTap for Terms
                             ),
                             const TextSpan(text: ' & '),
                             TextSpan(
                               text: 'Privacy Policy',
-                              style: const TextStyle(color: Colors.blue, decoration: TextDecoration.underline),
+                              style: TextStyle(color: Theme
+                                  .of(context)
+                                  .colorScheme
+                                  .primary,
+                                  decoration: TextDecoration
+                                      .underline), // Use theme color
                               // TODO: Add onTap for Privacy Policy
                             ),
                           ],
@@ -285,16 +323,22 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 ),
                 if (!_agreeToTerms)
                   Padding(
-                    padding: const EdgeInsets.only(left: 12.0, top: 5.0), // Added top padding
+                    padding: const EdgeInsets.only(left: 12.0, top: 5.0),
                     child: Text(
                       'You must agree to the terms and privacy policy.',
-                      style: TextStyle(color: Theme.of(context).colorScheme.error, fontSize: 12),
+                      style: TextStyle(color: Theme
+                          .of(context)
+                          .colorScheme
+                          .error, fontSize: 12),
                     ),
                   ),
                 const SizedBox(height: 30),
                 ElevatedButton(
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.black,
+                    backgroundColor: Theme
+                        .of(context)
+                        .colorScheme
+                        .primary, // Use theme color
                     padding: const EdgeInsets.symmetric(vertical: 16.0),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(8.0),
@@ -306,14 +350,20 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       print('Create Account button tapped');
                       print('User Type: ${_selectedUserType?.name}');
                       print('Email: ${_emailController.text}');
-                      // Navigate to Login Screen
                       Navigator.pushReplacement(
                         context,
-                        MaterialPageRoute(builder: (context) => const LoginScreen()),
+                        MaterialPageRoute(
+                            builder: (context) => const LoginScreen()),
                       );
                     }
                   },
-                  child: const Text('Create Account', style: TextStyle(fontSize: 16, color: Colors.white)),
+                  child: Text(
+                    'Create Account',
+                    style: TextStyle(fontSize: 16, color: Theme
+                        .of(context)
+                        .colorScheme
+                        .onPrimary), // Use theme color
+                  ),
                 ),
                 const SizedBox(height: 30),
                 const Row(
@@ -329,7 +379,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 const SizedBox(height: 30),
                 OutlinedButton.icon(
                   icon: const Icon(Icons.g_mobiledata, color: Colors.black),
-                  label: const Text('Sign up with Google', style: TextStyle(color: Colors.black)),
+                  label: const Text('Sign up with Google',
+                      style: TextStyle(color: Colors.black)),
                   style: OutlinedButton.styleFrom(
                     padding: const EdgeInsets.symmetric(vertical: 12.0),
                     side: const BorderSide(color: Colors.grey),
@@ -345,7 +396,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 const SizedBox(height: 15),
                 OutlinedButton.icon(
                   icon: const Icon(Icons.window, color: Colors.black),
-                  label: const Text('Sign up with Microsoft', style: TextStyle(color: Colors.black)),
+                  label: const Text('Sign up with Microsoft',
+                      style: TextStyle(color: Colors.black)),
                   style: OutlinedButton.styleFrom(
                     padding: const EdgeInsets.symmetric(vertical: 12.0),
                     side: const BorderSide(color: Colors.grey),
@@ -362,15 +414,23 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: <Widget>[
-                    const Text("Already have an account?", style: TextStyle(color: Colors.grey)),
+                    const Text("Already have an account?",
+                        style: TextStyle(color: Colors.grey)),
                     TextButton(
                       onPressed: () {
                         Navigator.pushReplacement(
                           context,
-                          MaterialPageRoute(builder: (context) => const LoginScreen()),
+                          MaterialPageRoute(builder: (
+                              context) => const LoginScreen()),
                         );
                       },
-                      child: const Text('Login', style: TextStyle(color: Colors.black)),
+                      child: Text(
+                        'Login',
+                        style: TextStyle(color: Theme
+                            .of(context)
+                            .colorScheme
+                            .primary), // Use theme color
+                      ),
                     ),
                   ],
                 ),
