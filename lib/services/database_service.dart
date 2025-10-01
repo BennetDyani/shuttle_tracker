@@ -59,9 +59,11 @@
 
 
 import 'package:mysql1/mysql1.dart';
-class DatabaseService { static final DatabaseService _instance = DatabaseService._internal(); factory DatabaseService() => _instance; DatabaseService._internal();
+class DatabaseService { static final DatabaseService _instance = DatabaseService._internal();
+  factory DatabaseService() => _instance; DatabaseService._internal();
 MySqlConnection? _connection; bool _isConnected = false;
-Future<MySqlConnection> get connection async { if (_connection == null) { _connection = await _createConnection(); _isConnected = true; }
+Future<MySqlConnection> get connection async { if (_connection == null)
+{ _connection = await _createConnection(); _isConnected = true; }
 // Check if connection is still valid by executing a simple query
 try {
   await _connection!.query('SELECT 1');

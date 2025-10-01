@@ -23,13 +23,11 @@ class DisabledStudent {
     );
   }
 
-  // Add this toString method for debugging
   @override
   String toString() {
     return 'DisabledStudent{disabledId: $disabledId, studentId: $studentId, disabilityType: $disabilityType, exposureMinibus: $exposureMinibus, accessNeeds: $accessNeeds}';
   }
 
-  // Optional: Add a toMap method if you need it later
   Map<String, dynamic> toMap() {
     return {
       'disabled_id': disabledId,
