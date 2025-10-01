@@ -1,14 +1,14 @@
 import 'package:mysql1/mysql1.dart';
 import '../models/user.dart';
-import '../models/student.dart';
+//import '../models/student.dart';
 import '../models/admin.dart';
 import 'database_service.dart';
-import '../models/disabled_student.dart';
+import '../models/disabled_students.dart';
 
-class AuthService {
-  final DatabaseService _dbService = DatabaseService();
+ class AuthService {
+   final DatabaseService _dbService = DatabaseService();
 
-  // EXISTING CODE - Student Registration
+  //EXISTING CODE - Student Registration
   Future<User?> registerUser({
     required String name,
     required String surname,
@@ -69,45 +69,6 @@ class AuthService {
     }
   }
 
-  Future<DisabledStudent?> getDisabledStudentDetails(int userId) async {
-    try {
-      print('🔍 Fetching disabled student details for user ID: $userId');
-      final conn = await _dbService.connection;
-
-      final results = await conn.query(
-        'SELECT ds.* FROM DisabledStudent ds '
-            'JOIN Student s ON ds.student_id = s.student_id '
-            'WHERE s.user_id = ?',
-        [userId],
-      );
-
-      print('🔍 Query returned ${results.length} rows');
-
-      if (results.isNotEmpty) {
-        final row = results.first;
-        print('🔍 Row data: $row');
-
-        // Create DisabledStudent object
-        final disabledStudent = DisabledStudent(
-          disabledId: row['disabled_id'] as int,
-          studentId: row['student_id'] as int,
-          disabilityType: row['disability_type'] as String,
-          exposureMinibus: (row['exposure_minibus'] as int) == 1,
-          accessNeeds: row['access_needs'] as String? ?? '',
-        );
-
-        print('🔍 DisabledStudent created: ${disabledStudent.toMap()}');
-        return disabledStudent;
-      }
-
-      print('🔍 No disabled student record found');
-      return null;
-    } catch (e) {
-      print('❌ Error in getDisabledStudentDetails: $e');
-      return null;
-    }
-  }
-
   // EXISTING CODE - Email Check
   Future<bool> checkEmailExists(String email) async {
     final conn = await _dbService.connection;
@@ -124,6 +85,45 @@ class AuthService {
       rethrow;
     }
   }
+
+   Future<DisabledStudent?> getDisabledStudentDetails(int userId) async {
+     try {
+       print('🔍 Fetching disabled student details for user ID: $userId');
+       final conn = await _dbService.connection;
+
+       final results = await conn.query(
+         'SELECT ds.* FROM DisabledStudent ds '
+             'JOIN Student s ON ds.student_id = s.student_id '
+             'WHERE s.user_id = ?',
+         [userId],
+       );
+
+       print('🔍 Query returned ${results.length} rows');
+
+       if (results.isNotEmpty) {
+         final row = results.first;
+         print('🔍 Row data: $row');
+
+         // Create DisabledStudent object
+         final disabledStudent = DisabledStudent(
+           disabledId: row['disabled_id'] as int,
+           studentId: row['student_id'] as int,
+           disabilityType: row['disability_type'] as String,
+           exposureMinibus: (row['exposure_minibus'] as int) == 1,
+           accessNeeds: row['access_needs'] as String? ?? '',
+         );
+
+         print('🔍 DisabledStudent created: ${disabledStudent.toMap()}');
+         return disabledStudent;
+       }
+
+       print('🔍 No disabled student record found');
+       return null;
+     } catch (e) {
+       print('❌ Error in getDisabledStudentDetails: $e');
+       return null;
+     }
+   }
 
   // UPDATED Login Method (now includes admin and driver detection)
   Future<User?> loginUser(String email, String password) async {
@@ -168,7 +168,7 @@ class AuthService {
     }
   }
 
-  // NEW CODE - Admin Methods
+  //NEW CODE - Admin Methods
   Future<Admin?> getAdminDetails(int userId) async {
     final conn = await _dbService.connection;
 
