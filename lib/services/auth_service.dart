@@ -3,6 +3,7 @@ import '../models/user.dart';
 import '../models/student.dart';
 import '../models/admin.dart';
 import 'database_service.dart';
+import '../models/disabled_student.dart';
 
 class AuthService {
   final DatabaseService _dbService = DatabaseService();

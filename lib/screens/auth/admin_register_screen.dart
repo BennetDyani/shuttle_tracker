@@ -31,7 +31,7 @@ class _AdminRegisterScreenState extends State<AdminRegisterScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Admin Registration'),
-        backgroundColor: Colors.red[800],
+        backgroundColor: Colors.green[400],
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(20),
@@ -42,7 +42,7 @@ class _AdminRegisterScreenState extends State<AdminRegisterScreen> {
               Icon(
                 Icons.admin_panel_settings,
                 size: 100,
-                color: Colors.red[800],
+                color: Colors.green[400],
               ),
               const SizedBox(height: 20),
               const Text(
@@ -170,25 +170,25 @@ class _AdminRegisterScreenState extends State<AdminRegisterScreen> {
             return null;
           },
         ),
-        const SizedBox(height: 15),
-        TextFormField(
-          controller: _adminCodeController,
-          decoration: const InputDecoration(
-            labelText: 'Admin Registration Code',
-            border: OutlineInputBorder(),
-            prefixIcon: Icon(Icons.security),
-          ),
-          obscureText: true,
-          validator: (value) {
-            if (value == null || value.isEmpty) {
-              return 'Please enter admin code';
-            }
-            if (value != _validAdminCode) {
-              return 'Invalid admin registration code';
-            }
-            return null;
-          },
-        ),
+        // const SizedBox(height: 15),
+        // TextFormField(
+        //   controller: _adminCodeController,
+        //   decoration: const InputDecoration(
+        //     labelText: 'Admin Registration Code',
+        //     border: OutlineInputBorder(),
+        //     prefixIcon: Icon(Icons.security),
+        //   ),
+        //   obscureText: true,
+        //   validator: (value) {
+        //     if (value == null || value.isEmpty) {
+        //       return 'Please enter admin code';
+        //     }
+        //     if (value != _validAdminCode) {
+        //       return 'Invalid admin registration code';
+        //     }
+        //     return null;
+        //   },
+        // ),
       ],
     );
   }
@@ -201,7 +201,7 @@ class _AdminRegisterScreenState extends State<AdminRegisterScreen> {
             : ElevatedButton(
           onPressed: _registerAdmin,
           style: ElevatedButton.styleFrom(
-            backgroundColor: Colors.red[800],
+            backgroundColor: Colors.green[400],
             minimumSize: const Size(double.infinity, 50),
           ),
           child: const Text(

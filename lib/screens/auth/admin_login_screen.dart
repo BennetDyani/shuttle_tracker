@@ -23,7 +23,7 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Admin Login'),
-        backgroundColor: Colors.red[800], // Different color for admin
+        backgroundColor: Colors.green[400], // Different color for admin
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(20),
@@ -34,7 +34,7 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
               Icon(
                 Icons.admin_panel_settings,
                 size: 120,
-                color: Colors.red[800],
+                color: Colors.green[400],
               ),
               const SizedBox(height: 30),
               const Text(
@@ -90,7 +90,7 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
                   : ElevatedButton(
                 onPressed: _login,
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.red[800],
+                  backgroundColor: Colors.green[400],
                   minimumSize: const Size(double.infinity, 50),
                 ),
                 child: const Text(
@@ -98,6 +98,16 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
                   style: TextStyle(fontSize: 18, color: Colors.white),
                 ),
               ),
+              const SizedBox(height: 15),
+              TextButton(
+                onPressed: () {
+                  Navigator.pushNamed(context, '/admin/register');
+                },
+                child: const Text('Not registered yet? Register Admin here'),
+              ),
+
+
+
               const SizedBox(height: 15),
               TextButton(
                 onPressed: () {
