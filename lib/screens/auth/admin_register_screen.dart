@@ -8,6 +8,7 @@ class AdminRegisterScreen extends StatefulWidget {
   _AdminRegisterScreenState createState() => _AdminRegisterScreenState();
 }
 
+
 class _AdminRegisterScreenState extends State<AdminRegisterScreen> {
   final _formKey = GlobalKey<FormState>();
   final _authService = AuthService();
