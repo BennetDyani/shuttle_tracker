@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:shuttle_tracker/screens/authentication/login_screen.dart';
+import 'package:shuttle_tracker/screens/auth/login_screen.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});

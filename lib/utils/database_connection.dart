@@ -8,7 +8,7 @@ class DatabaseConnection {
       host: 'localhost', // or your database server's IP address, e.g., '10.0.2.2' for Android emulator
       port: 3306, // default MySQL port
       user: 'root', // e.g., 'root'
-      password: 'Izzy@2020',
+      password: 'password',
       db: 'shuttle_tracking', // The database name we created
     );
 
@@ -16,3 +16,8 @@ class DatabaseConnection {
     return await MySqlConnection.connect(settings);
   }
 }
+
+
+
+
+

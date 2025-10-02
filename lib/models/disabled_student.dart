@@ -1,20 +1,3 @@
-class Student {
-  final int studentId;
-  final int userId;
-
-  Student({
-    required this.studentId,
-    required this.userId,
-  });
-
-  factory Student.fromMap(Map<String, dynamic> map) {
-    return Student(
-      studentId: map['student_id'],
-      userId: map['user_id'],
-    );
-  }
-}
-
 class DisabledStudent {
   final int disabledId;
   final int studentId;
@@ -40,8 +23,14 @@ class DisabledStudent {
     );
   }
 
+  @override
+  String toString() {
+    return 'DisabledStudent{disabledId: $disabledId, studentId: $studentId, disabilityType: $disabilityType, exposureMinibus: $exposureMinibus, accessNeeds: $accessNeeds}';
+  }
+
   Map<String, dynamic> toMap() {
     return {
+      'disabled_id': disabledId,
       'student_id': studentId,
       'disability_type': disabilityType,
       'exposure_minibus': exposureMinibus ? 1 : 0,
