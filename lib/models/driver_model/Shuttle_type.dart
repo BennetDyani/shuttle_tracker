@@ -1,0 +1,4 @@
+enum ShuttleType {
+  BUS,
+  MINIBUS
+}

@@ -1,0 +1,6 @@
+enum Role {
+  ADMIN,
+  DRIVER,
+  STUDENT,
+  DISABLED_STUDENT
+}

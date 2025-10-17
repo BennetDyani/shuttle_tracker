@@ -1,16 +1,40 @@
 import 'package:flutter/material.dart';
-import 'package:shuttle_tracker/screens/authentication/login_screen.dart';
-import 'package:shuttle_tracker/screens/authentication/register_screen.dart';
-//import 'package:firebase_core/firebase_core.dart'; // Import Firebase Core
-//import 'package:authentication_app/auth_screen.dart';
-import 'package:shuttle_tracker/screens/home_screen.dart';
-import 'package:shuttle_tracker/screens/admin/admin_home_screen.dart';
-
-import 'package:flutter/material.dart';
-import 'package:shuttle_tracker/screens/authentication/login_screen.dart'; // Assuming LoginScreen is your initial screen or you have a wrapper.
+import 'package:provider/provider.dart';
+import 'package:shuttle_tracker/screens/admin/manage_complaints.dart';
+import 'package:shuttle_tracker/screens/admin/manage_route.dart';
+import 'package:shuttle_tracker/screens/admin/admin_dashboard.dart';
+import 'screens/authentication/login_screen.dart';
+import 'screens/authentication/register_screen.dart';
+import 'screens/admin/assign_driver.dart';
+import 'screens/admin/manage_notifications.dart';
+import 'screens/admin/manage_shuttles.dart';
+import 'screens/admin/manage_user.dart';
+import 'screens/admin/profile.dart';
+import 'screens/admin/manage_fleet.dart';
+import 'screens/student/normal_students/normal_student_dashboard.dart';
+import 'screens/student/disabled_student/disabled_student_dashboard.dart';
+import 'screens/driver/driver_dashboard.dart';
+import 'screens/ws_location_demo.dart';
+import 'screens/authentication/staff_login_screen.dart';
+import 'screens/authentication/admin_register_screen.dart';
+import 'providers/auth_provider.dart';
+// Global error logging
+import 'dart:async';
+import 'services/logger.dart';
 
 void main() {
-  runApp(const MyApp());
+  // Print uncaught Flutter framework errors
+  FlutterError.onError = (FlutterErrorDetails details) {
+    AppLogger.error('FlutterError.onError', error: details.exception, stackTrace: details.stack);
+    FlutterError.presentError(details);
+  };
+
+  // Capture all other zone errors (async, timers, futures)
+  runZonedGuarded(() {
+    runApp(const MyApp());
+  }, (Object error, StackTrace stackTrace) {
+    AppLogger.exception('Uncaught zone error', error, stackTrace);
+  });
 }
 
 class MyApp extends StatelessWidget {
@@ -18,30 +42,72 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      title: 'Shuttle Tracker', // From your project name shuttle_tracker1
-      theme: ThemeData(
-        primarySwatch: Colors.blue,
-        // Primary color
-        colorScheme: ColorScheme.fromSwatch(
-          primarySwatch: Colors.blue, // Base for primary color shades
-          accentColor: Colors
-              .green, // Secondary color (also known as accent color)
-          // You can also specify brightness, errorColor, etc. within ColorScheme if needed
-          // For example:
-          // brightness: Brightness.light,
-          // errorColor: Colors.red,
+    return ChangeNotifierProvider(
+      create: (_) => AuthProvider()..tryAutoLogin(),
+      child: MaterialApp(
+        debugShowCheckedModeBanner: false,
+        title: 'Shuttle Tracker',
+        theme: ThemeData(
+          primarySwatch: Colors.blue,
+          colorScheme: ColorScheme.fromSwatch(
+            primarySwatch: Colors.blue,
+            accentColor: Colors.green,
+          ),
+          visualDensity: VisualDensity.adaptivePlatformDensity,
         ),
-        // It's also good practice to ensure visual density for cross-platform consistency.
-        visualDensity: VisualDensity.adaptivePlatformDensity,
+        // Use an auth gate so tests and app start at Login when not authenticated
+        home: const _AuthGate(),
+        routes: {
+          '/login': (context) => const LoginScreen(),
+          '/register': (context) => const RegisterScreen(),
+          '/login/staff': (context) => const StaffLoginScreen(),
+          '/register/admin': (context) => const AdminRegisterScreen(),
+          '/student/dashboard': (context) => const NormalStudentDashboard(),
+          '/student/disabled/dashboard': (context) => const DisabledStudentDashboard(),
+          '/driver/dashboard': (context) => const DriverDashboard(),
+          '/admin/dashboard': (context) => const AdminHomeScreen(),
+          '/admin/users': (context) => const ManageUserScreen(),
+          '/admin/shuttles': (context) => const ManageShuttlesScreen(),
+          '/admin/fleet': (context) => const ManageFleetScreen(),
+          '/admin/notifications': (context) => const ManageNotificationsScreen(),
+          '/admin/profile': (context) => const AdminProfilePage(),
+          '/admin/assign-driver': (context) => const AssignDriverScreen(),
+          '/admin/complaints': (context) => const ManageComplaintsScreen(),
+          '/admin/routes': (context) => const ManageRouteScreen(),
+          // Development/demo route for WebSocket STOMP testing
+          '/dev/ws-demo': (context) => const WsLocationDemoScreen(),
+        },
       ),
-      home: const AdminHomeScreen(), // Replace with your actual initial screen/widget if different
     );
   }
 }
 
+class _AuthGate extends StatelessWidget {
+  const _AuthGate();
 
+  @override
+  Widget build(BuildContext context) {
+    final auth = context.watch<AuthProvider>();
 
+    if (!auth.isInitialized) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
 
+    if (auth.isAuthenticated) {
+      final role = (auth.role ?? '').toUpperCase();
+      if (role == 'ADMIN') {
+        return const AdminHomeScreen();
+      } else if (role == 'DRIVER') {
+        return const DriverDashboard();
+      } else if (role == 'DISABLED_STUDENT') {
+        return const DisabledStudentDashboard();
+      } else {
+        return const NormalStudentDashboard();
+      }
+    }
 
+    return const LoginScreen();
+  }
+}
