@@ -17,12 +17,18 @@ class AuthProvider extends ChangeNotifier {
 
   static const _kUserIdKey = 'auth_user_id';
   static const _kRoleKey = 'auth_role';
+  static const _kAuthTokenKey = 'auth_token';
+  static const _kRefreshTokenKey = 'refresh_token';
 
   Future<void> tryAutoLogin() async {
     try {
       final prefs = await SharedPreferences.getInstance();
       _userId = prefs.getString(_kUserIdKey);
       _role = prefs.getString(_kRoleKey);
+      final token = prefs.getString(_kAuthTokenKey) ?? '';
+      final refresh = prefs.getString(_kRefreshTokenKey) ?? '';
+      globals.authToken = token;
+      globals.refreshToken = refresh;
       // Consider role presence sufficient for session restoration if userId missing
       final hasUserId = _userId != null && _userId!.isNotEmpty;
       final hasRole = _role != null && _role!.isNotEmpty;
@@ -39,6 +45,8 @@ class AuthProvider extends ChangeNotifier {
       _userId = null;
       _role = null;
       globals.loggedInUserId = '';
+      globals.authToken = '';
+      globals.refreshToken = '';
     } finally {
       _initialized = true;
       notifyListeners();
@@ -60,6 +68,8 @@ class AuthProvider extends ChangeNotifier {
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove(_kUserIdKey);
       await prefs.remove(_kRoleKey);
+      await prefs.remove(_kAuthTokenKey);
+      await prefs.remove(_kRefreshTokenKey);
     } catch (e, st) {
       AppLogger.exception('AuthProvider logout persistence failed', e, st);
     }
@@ -67,6 +77,8 @@ class AuthProvider extends ChangeNotifier {
     _userId = null;
     _role = null;
     globals.loggedInUserId = '';
+    globals.authToken = '';
+    globals.refreshToken = '';
     notifyListeners();
   }
 
@@ -113,6 +125,36 @@ class AuthProvider extends ChangeNotifier {
     // Use fallback if role still missing
     role ??= fallbackRole;
 
+    // Try to extract an auth token from various shapes
+    String? token;
+    String? refresh;
+    try {
+      if (result is Map<String, dynamic>) {
+        if (result['token'] is String) token = result['token'];
+        if (token == null && result['accessToken'] is String) token = result['accessToken'];
+        if (token == null && result['authToken'] is String) token = result['authToken'];
+        if (token == null && result['jwt'] is String) token = result['jwt'];
+        if (token == null && result['id_token'] is String) token = result['id_token'];
+        if (result['refreshToken'] is String) refresh = result['refreshToken'];
+        if (refresh == null && result['refresh_token'] is String) refresh = result['refresh_token'];
+        // nested user/data
+        if (token == null && result['user'] is Map<String, dynamic>) {
+          final user = result['user'] as Map<String, dynamic>;
+          if (user['token'] is String) token = user['token'];
+          else if (user['accessToken'] is String) token = user['accessToken'];
+          if (user['refreshToken'] is String) refresh = user['refreshToken'];
+          if (refresh == null && user['refresh_token'] is String) refresh = user['refresh_token'];
+        }
+        if (token == null && result['data'] is Map<String, dynamic>) {
+          final data = result['data'] as Map<String, dynamic>;
+          if (data['token'] is String) token = data['token'];
+          else if (data['accessToken'] is String) token = data['accessToken'];
+          if (data['refreshToken'] is String) refresh = data['refreshToken'];
+          if (refresh == null && data['refresh_token'] is String) refresh = data['refresh_token'];
+        }
+      }
+    } catch (_) {}
+
     if (role == null) {
       throw Exception('Login succeeded but role missing in response');
     }
@@ -122,6 +164,8 @@ class AuthProvider extends ChangeNotifier {
     _userId = uid ?? '';
     _isAuthenticated = true;
     globals.loggedInUserId = _userId ?? '';
+    globals.authToken = token ?? '';
+    globals.refreshToken = refresh ?? globals.refreshToken;
 
     _persist();
     notifyListeners();
@@ -133,6 +177,8 @@ class AuthProvider extends ChangeNotifier {
       final prefs = await SharedPreferences.getInstance();
       if (_userId != null) await prefs.setString(_kUserIdKey, _userId!);
       if (_role != null) await prefs.setString(_kRoleKey, _role!);
+      await prefs.setString(_kAuthTokenKey, globals.authToken);
+      await prefs.setString(_kRefreshTokenKey, globals.refreshToken);
     } catch (e, st) {
       AppLogger.exception('AuthProvider persist failed', e, st);
     }

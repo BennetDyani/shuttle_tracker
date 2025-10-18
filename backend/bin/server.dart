@@ -476,7 +476,24 @@ Future<Response> _updateUserHandler(Request request, String id) async {
 
 Future<Response> _readUserByIdHandler(Request request, String id) async {
   try {
-    final result = await db.query('SELECT * FROM users WHERE user_id = @id', substitutionValues: {'id': int.parse(id)});
+    final result = await db.query(
+      '''
+      SELECT u.*, r.role_name,
+             s.staff_id AS staff_id,
+             st.student_id AS student_id,
+             st.phone_number AS student_phone,
+             st.has_disability AS student_has_disability,
+             st.disability_type AS student_disability_type,
+             st.requires_minibus AS student_requires_minibus
+      FROM users u
+      JOIN roles r ON u.role_id = r.role_id
+      LEFT JOIN staff s ON s.user_id = u.user_id
+      LEFT JOIN students st ON st.user_id = u.user_id
+      WHERE u.user_id = @id
+      ''',
+      substitutionValues: {'id': int.parse(id)},
+    );
+
     if (result.isNotEmpty) {
       return Response.ok(_jsonEncodeSafe(result.first.toColumnMap()));
     } else {

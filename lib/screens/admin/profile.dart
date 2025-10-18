@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../../providers/auth_provider.dart';
+import '../../services/APIService.dart';
 
 class AdminProfilePage extends StatefulWidget {
   const AdminProfilePage({Key? key}) : super(key: key);
@@ -9,16 +12,16 @@ class AdminProfilePage extends StatefulWidget {
 
 class _AdminProfilePageState extends State<AdminProfilePage> {
   final _formKey = GlobalKey<FormState>();
-  String name = 'Admin User';
-  String email = 'admin@example.com';
-  String phone = '+1234567890';
+  String name = '';
+  String email = '';
+  String phone = '';
 
   // Password fields
   final _currentPasswordController = TextEditingController();
   final _newPasswordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
 
-  // Mock activity log
+  // Mock activity log (kept local but we prepend fetched activity if available)
   final List<String> activityLog = [
     'Logged in',
     'Updated profile',
@@ -35,12 +38,47 @@ class _AdminProfilePageState extends State<AdminProfilePage> {
   bool _canAssignDrivers = false;
   bool _canViewReports = false;
 
+  bool _isLoading = true;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadProfile();
+  }
+
   @override
   void dispose() {
     _currentPasswordController.dispose();
     _newPasswordController.dispose();
     _confirmPasswordController.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadProfile() async {
+    setState(() {
+      _isLoading = true;
+      _error = null;
+    });
+    try {
+      final auth = Provider.of<AuthProvider>(context, listen: false);
+      final uidStr = auth.userId;
+      if (uidStr == null || uidStr.isEmpty) throw Exception('Not logged in');
+      final uid = int.tryParse(uidStr);
+      if (uid == null) throw Exception('Invalid user id');
+
+      final user = await APIService().fetchUserById(uid);
+      setState(() {
+        name = (user['first_name'] ?? user['name'] ?? '') as String;
+        // try multiple keys for compatibility
+        email = (user['email'] ?? '') as String;
+        phone = (user['phone_number'] ?? user['phone'] ?? user['phoneNumber'] ?? '') as String;
+      });
+    } catch (e) {
+      setState(() => _error = e.toString());
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
   }
 
   void _updateProfile() {
@@ -84,6 +122,29 @@ class _AdminProfilePageState extends State<AdminProfilePage> {
 
   @override
   Widget build(BuildContext context) {
+    if (_isLoading) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+
+    if (_error != null) {
+      return Scaffold(
+        appBar: AppBar(
+          title: const Text('Admin Profile'),
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back),
+            onPressed: () {
+              if (Navigator.canPop(context)) {
+                Navigator.pop(context);
+              } else {
+                Navigator.pushReplacementNamed(context, '/admin/dashboard');
+              }
+            },
+          ),
+        ),
+        body: Center(child: Text('Error loading profile: $_error')),
+      );
+    }
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Admin Profile'),

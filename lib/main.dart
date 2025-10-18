@@ -4,7 +4,7 @@ import 'package:shuttle_tracker/screens/admin/manage_complaints.dart';
 import 'package:shuttle_tracker/screens/admin/manage_route.dart';
 import 'package:shuttle_tracker/screens/admin/admin_dashboard.dart';
 import 'screens/authentication/login_screen.dart';
-import 'screens/authentication/register_screen.dart';
+import 'screens/auth/register_screen.dart';
 import 'screens/admin/assign_driver.dart';
 import 'screens/admin/manage_notifications.dart';
 import 'screens/admin/manage_shuttles.dart';
@@ -15,9 +15,11 @@ import 'screens/student/normal_students/normal_student_dashboard.dart';
 import 'screens/student/disabled_student/disabled_student_dashboard.dart';
 import 'screens/driver/driver_dashboard.dart';
 import 'screens/ws_location_demo.dart';
-import 'screens/authentication/staff_login_screen.dart';
-import 'screens/authentication/admin_register_screen.dart';
+import 'screens/auth/staff_login_screen.dart';
+import 'screens/auth/admin_register_screen.dart';
 import 'providers/auth_provider.dart';
+import 'providers/notifications_provider.dart';
+import 'services/globals.dart' as globals;
 // Global error logging
 import 'dart:async';
 import 'services/logger.dart';
@@ -42,42 +44,48 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ChangeNotifierProvider(
-      create: (_) => AuthProvider()..tryAutoLogin(),
-      child: MaterialApp(
-        debugShowCheckedModeBanner: false,
-        title: 'Shuttle Tracker',
-        theme: ThemeData(
-          primarySwatch: Colors.blue,
-          colorScheme: ColorScheme.fromSwatch(
+    return MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (_) => AuthProvider()..tryAutoLogin()),
+        ChangeNotifierProvider(create: (_) => NotificationsProvider()),
+      ],
+      child: Consumer<NotificationsProvider>(builder: (context, notif, _) {
+        return MaterialApp(
+          navigatorKey: globals.navigatorKey,
+          debugShowCheckedModeBanner: false,
+          title: 'Shuttle Tracker',
+          theme: ThemeData(
             primarySwatch: Colors.blue,
-            accentColor: Colors.green,
+            colorScheme: ColorScheme.fromSwatch(
+              primarySwatch: Colors.blue,
+              accentColor: Colors.green,
+            ),
+            visualDensity: VisualDensity.adaptivePlatformDensity,
           ),
-          visualDensity: VisualDensity.adaptivePlatformDensity,
-        ),
-        // Use an auth gate so tests and app start at Login when not authenticated
-        home: const _AuthGate(),
-        routes: {
-          '/login': (context) => const LoginScreen(),
-          '/register': (context) => const RegisterScreen(),
-          '/login/staff': (context) => const StaffLoginScreen(),
-          '/register/admin': (context) => const AdminRegisterScreen(),
-          '/student/dashboard': (context) => const NormalStudentDashboard(),
-          '/student/disabled/dashboard': (context) => const DisabledStudentDashboard(),
-          '/driver/dashboard': (context) => const DriverDashboard(),
-          '/admin/dashboard': (context) => const AdminHomeScreen(),
-          '/admin/users': (context) => const ManageUserScreen(),
-          '/admin/shuttles': (context) => const ManageShuttlesScreen(),
-          '/admin/fleet': (context) => const ManageFleetScreen(),
-          '/admin/notifications': (context) => const ManageNotificationsScreen(),
-          '/admin/profile': (context) => const AdminProfilePage(),
-          '/admin/assign-driver': (context) => const AssignDriverScreen(),
-          '/admin/complaints': (context) => const ManageComplaintsScreen(),
-          '/admin/routes': (context) => const ManageRouteScreen(),
-          // Development/demo route for WebSocket STOMP testing
-          '/dev/ws-demo': (context) => const WsLocationDemoScreen(),
-        },
-      ),
+          // Use an auth gate so tests and app start at Login when not authenticated
+          home: const _AuthGate(),
+          routes: {
+            '/login': (context) => const LoginScreen(),
+            '/register': (context) => const RegisterScreen(),
+            '/login/staff': (context) => const StaffLoginScreen(),
+            '/register/admin': (context) => const AdminRegisterScreen(),
+            '/student/dashboard': (context) => const NormalStudentDashboard(),
+            '/student/disabled/dashboard': (context) => const DisabledStudentDashboard(),
+            '/driver/dashboard': (context) => const DriverDashboard(),
+            '/admin/dashboard': (context) => const AdminHomeScreen(),
+            '/admin/users': (context) => const ManageUserScreen(),
+            '/admin/shuttles': (context) => const ManageShuttlesScreen(),
+            '/admin/fleet': (context) => const ManageFleetScreen(),
+            '/admin/notifications': (context) => const ManageNotificationsScreen(),
+            '/admin/profile': (context) => const AdminProfilePage(),
+            '/admin/assign-driver': (context) => const AssignDriverScreen(),
+            '/admin/complaints': (context) => const ManageComplaintsScreen(),
+            '/admin/routes': (context) => const ManageRouteScreen(),
+            // Development/demo route for WebSocket STOMP testing
+            '/dev/ws-demo': (context) => const WsLocationDemoScreen(),
+          },
+        );
+      }),
     );
   }
 }

@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import '../../services/APIService.dart';
 import '../../services/endpoints.dart';
 import '../../models/driver_model/Driver.dart';
-import '../../models/User.dart' as app_user;
+import '../../providers/auth_provider.dart';
 
 class DriverProfilePage extends StatefulWidget {
   const DriverProfilePage({super.key});
@@ -12,7 +13,8 @@ class DriverProfilePage extends StatefulWidget {
 }
 
 class _DriverProfilePageState extends State<DriverProfilePage> {
-  Driver? driver;
+  Map<String, dynamic>? driverRow;
+  Map<String, dynamic>? userRow;
   bool isLoading = true;
   String? errorMessage;
 
@@ -28,27 +30,50 @@ class _DriverProfilePageState extends State<DriverProfilePage> {
       errorMessage = null;
     });
     try {
-      // Replace with actual driver ID or email as needed
-      final fetchedDriver = await APIService().get(Endpoints.driverReadById(1));
+      final auth = Provider.of<AuthProvider>(context, listen: false);
+      final uidStr = auth.userId;
+      if (uidStr == null || uidStr.isEmpty) throw Exception('Not logged in');
+      final uid = int.tryParse(uidStr);
+      if (uid == null) throw Exception('Invalid user id');
+
+      // Fetch the user row (includes email)
+      final fetchedUser = await APIService().fetchUserById(uid);
+
+      // Use user's email to fetch driver row (driver table links to user by user_id)
+      final email = fetchedUser['email'] as String?;
+      Map<String, dynamic>? fetchedDriver;
+      if (email != null && email.isNotEmpty) {
+        try {
+          fetchedDriver = await APIService().fetchDriverByEmail(email);
+        } catch (_) {
+          // driver row might not exist; ignore and continue
+          fetchedDriver = null;
+        }
+      }
+
       setState(() {
-        driver = Driver.fromJson(fetchedDriver);
-        isLoading = false;
+        userRow = fetchedUser;
+        driverRow = fetchedDriver;
       });
     } catch (e) {
-      setState(() {
-        errorMessage = e.toString();
-        isLoading = false;
-      });
+      setState(() => errorMessage = e.toString());
+    } finally {
+      if (mounted) setState(() => isLoading = false);
     }
   }
 
-  Future<void> _updateDriverProfile(Driver updatedDriver) async {
+  // Update: accept a JSON-like payload constructed by the edit dialog
+  Future<void> _updateDriverProfile(Map<String, dynamic> payload) async {
     setState(() {
       isLoading = true;
       errorMessage = null;
     });
     try {
-      await APIService().put(Endpoints.driverUpdate, updatedDriver.toJson());
+      // Determine driver id from fetched driverRow
+      final id = driverRow?['driver_id'] ?? driverRow?['driverId'];
+      if (id == null) throw Exception('Driver id missing');
+      final driverId = int.tryParse(id.toString()) ?? id;
+      await APIService().put('drivers/update/$driverId', payload);
       await _fetchDriverProfile();
     } catch (e) {
       setState(() {
@@ -60,6 +85,9 @@ class _DriverProfilePageState extends State<DriverProfilePage> {
 
   @override
   Widget build(BuildContext context) {
+    final displayName = userRow == null ? '-' : '${userRow!['first_name'] ?? ''} ${userRow!['last_name'] ?? ''}'.trim();
+    final driverLicense = driverRow?['license_number'] ?? '-';
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Profile'),
@@ -93,9 +121,11 @@ class _DriverProfilePageState extends State<DriverProfilePage> {
                                   Column(
                                     crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
-                                      Text(driver?.user.name ?? '-', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                                      Text(displayName, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
                                       const SizedBox(height: 4),
-                                      Text('Driver License: ${driver?.driverLicense ?? '-'}', style: const TextStyle(color: Colors.grey)),
+                                      Text('Email: ${userRow?['email'] ?? '-'}', style: const TextStyle(color: Colors.grey)),
+                                      const SizedBox(height: 4),
+                                      Text('Driver License: $driverLicense', style: const TextStyle(color: Colors.grey)),
                                     ],
                                   ),
                                 ],
@@ -107,11 +137,12 @@ class _DriverProfilePageState extends State<DriverProfilePage> {
                       const SizedBox(height: 32),
                       ElevatedButton.icon(
                         onPressed: () async {
-                          if (driver != null) {
-                            final updatedDriver = await _showEditDialog(context, driver!);
-                            if (updatedDriver != null) {
-                              await _updateDriverProfile(updatedDriver);
-                            }
+                          // Pre-fill values for dialog
+                          final name = userRow?['first_name'] ?? '';
+                          final license = driverRow?['license_number'] ?? '';
+                          final updatedData = await _showEditDialog(context, name, license, userRow);
+                          if (updatedData != null) {
+                            await _updateDriverProfile(updatedData);
                           }
                         },
                         icon: const Icon(Icons.edit),
@@ -124,11 +155,11 @@ class _DriverProfilePageState extends State<DriverProfilePage> {
     );
   }
 
-  Future<Driver?> _showEditDialog(BuildContext context, Driver driver) async {
-    final nameController = TextEditingController(text: driver.user.name);
-    final licenseController = TextEditingController(text: driver.driverLicense);
+  Future<Map<String, dynamic>?> _showEditDialog(BuildContext context, String currentName, String currentLicense, Map<String, dynamic>? user) async {
+    final nameController = TextEditingController(text: currentName);
+    final licenseController = TextEditingController(text: currentLicense);
 
-    return showDialog<Driver>(
+    return showDialog<Map<String, dynamic>>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Edit Profile'),
@@ -143,27 +174,16 @@ class _DriverProfilePageState extends State<DriverProfilePage> {
           TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancel')),
           ElevatedButton(
             onPressed: () {
-              final existingUser = driver.user;
-              final updatedUser = app_user.User(
-                userId: existingUser.userId,
-                name: nameController.text,
-                surname: existingUser.surname,
-                email: existingUser.email,
-                password: existingUser.password,
-                phoneNumber: existingUser.phoneNumber,
-                disability: existingUser.disability,
-                role: existingUser.role,
-                complaints: existingUser.complaints,
-                feedbacks: existingUser.feedbacks,
-                notifications: existingUser.notifications,
-              );
-
-              final updated = Driver(
-                driverId: driver.driverId,
-                user: updatedUser,
-                driverLicense: licenseController.text,
-              );
-              Navigator.of(context).pop(updated);
+              // Build a minimal payload the backend expects. Include userId so server can identify the user.
+              final payload = {
+                'driverId': driverRow?['driver_id'] ?? driverRow?['driverId'],
+                'driverLicense': licenseController.text,
+                'user': {
+                  'userId': user?['user_id'] ?? user?['userId'],
+                  'name': nameController.text,
+                },
+              };
+              Navigator.of(context).pop(payload);
             },
             child: const Text('Save'),
           ),
