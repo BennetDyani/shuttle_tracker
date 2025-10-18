@@ -116,7 +116,7 @@ class _DisabledStudentProfilePageState extends State<DisabledStudentProfilePage>
                       const SizedBox(height: 32),
                       ElevatedButton.icon(
                         onPressed: () {
-                          // TODO: Implement edit personal info
+
                         },
                         icon: const Icon(Icons.edit),
                         label: const Text('Edit Personal Info'),
