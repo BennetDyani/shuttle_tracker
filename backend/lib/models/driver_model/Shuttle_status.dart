@@ -1,0 +1,5 @@
+enum ShuttleStatus {
+  AVAILABLE,
+  IN_SERVICE,
+  UNDER_MAINTENANCE
+}
