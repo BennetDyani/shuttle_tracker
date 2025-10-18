@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
-import 'package:shuttle_tracker/screens/authentication/login_screen.dart';
+import 'package:provider/provider.dart';
+import '../authentication/login_screen.dart';
+import '../../providers/auth_provider.dart';
 import 'package:shuttle_tracker/services/APIService.dart';
 import 'package:shuttle_tracker/models/User.dart';
 import 'package:shuttle_tracker/models/driver_model/Driver.dart';
@@ -65,6 +67,9 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
 
   bool _loading = true;
   String? _error;
+  // Greeting name
+  String _displayName = '';
+  bool _isLoadingName = true;
 
   // Recent activity will be built from real data where possible
   List<Map<String, String>> recentActivity = [
@@ -75,6 +80,28 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
   void initState() {
     super.initState();
     _fetchDashboardData();
+    _loadName();
+  }
+
+  Future<void> _loadName() async {
+    try {
+      final auth = Provider.of<AuthProvider>(context, listen: false);
+      final uidStr = auth.userId;
+      if (uidStr == null || uidStr.isEmpty) return;
+      final uid = int.tryParse(uidStr);
+      if (uid == null) return;
+      final user = await APIService().fetchUserById(uid);
+      final first = (user['first_name'] ?? user['name'] ?? '').toString();
+      final last = (user['last_name'] ?? user['surname'] ?? '').toString();
+      final combined = ('$first $last').trim();
+      setState(() {
+        _displayName = combined.isEmpty ? (user['email'] ?? '') as String? ?? '' : combined;
+      });
+    } catch (e) {
+      AppLogger.warn('Failed to load admin name', data: e.toString());
+    } finally {
+      if (mounted) setState(() => _isLoadingName = false);
+    }
   }
 
   // Helper to parse dates from various API formats (ISO string or epoch seconds/ms)
@@ -555,7 +582,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
       appBar: AppBar(
         backgroundColor: theme.colorScheme.primary,
         elevation: 1,
-        title: const Text('Admin Dashboard', style: TextStyle(fontWeight: FontWeight.bold)),
+        title: Text(_isLoadingName ? 'Admin Dashboard' : 'Hi, ${_displayName}', style: const TextStyle(fontWeight: FontWeight.bold)),
         iconTheme: IconThemeData(color: theme.colorScheme.onPrimary),
         actions: [
           IconButton(

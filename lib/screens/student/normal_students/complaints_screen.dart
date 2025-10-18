@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../../../providers/auth_provider.dart';
+import '../../../services/APIService.dart';
 
 class ComplaintsScreen extends StatefulWidget {
   const ComplaintsScreen({super.key});
@@ -12,6 +15,7 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> {
   final TextEditingController _subjectController = TextEditingController();
   final TextEditingController _descriptionController = TextEditingController();
   String _selectedCategory = 'Delay';
+  bool _isLoading = false;
 
   final List<String> _categories = [
     'Delay',
@@ -28,17 +32,42 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> {
     super.dispose();
   }
 
-  void _submitComplaint() {
-    if (_formKey.currentState!.validate()) {
-      // Here you would send the complaint to your backend or database
+  Future<void> _submitComplaint() async {
+    if (!_formKey.currentState!.validate()) return;
+
+    final auth = context.read<AuthProvider>();
+    final uidStr = auth.userId;
+    if (uidStr == null || uidStr.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('You must be logged in to submit a complaint')));
+      return;
+    }
+
+    final userId = int.tryParse(uidStr);
+    if (userId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Invalid user id')));
+      return;
+    }
+
+    setState(() => _isLoading = true);
+
+    try {
+      final title = _subjectController.text.trim();
+      final description = '${_selectedCategory}: ${_descriptionController.text.trim()}';
+
+      await APIService().createComplaint(userId: userId, title: title, description: description);
+
       _subjectController.clear();
       _descriptionController.clear();
-      setState(() {
-        _selectedCategory = _categories[0];
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Complaint submitted successfully!')),
-      );
+      setState(() => _selectedCategory = _categories[0]);
+
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Complaint submitted successfully!')));
+    } catch (e) {
+      // Best-effort: show a friendly error message
+      String msg = 'Failed to submit complaint';
+      if (e is Exception) msg = e.toString();
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
@@ -72,7 +101,7 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> {
               ),
               const SizedBox(height: 16),
               DropdownButtonFormField<String>(
-                value: _selectedCategory,
+                initialValue: _selectedCategory,
                 items: _categories.map((cat) => DropdownMenuItem(
                   value: cat,
                   child: Text(cat),
@@ -99,12 +128,14 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> {
               ),
               const SizedBox(height: 24),
               ElevatedButton(
-                onPressed: _submitComplaint,
+                onPressed: _isLoading ? null : _submitComplaint,
                 style: ElevatedButton.styleFrom(
                   padding: const EdgeInsets.symmetric(vertical: 16),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                 ),
-                child: const Text('Submit Complaint'),
+                child: _isLoading
+                  ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                  : const Text('Submit Complaint'),
               ),
             ],
           ),

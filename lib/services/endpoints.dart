@@ -90,6 +90,12 @@ class Endpoints {
   static String feedbackDeleteById(int id) => 'feedbacks/delete/$id';
   static const String feedbackGetAll = 'feedbacks/getAll';
 
+  // Complaint endpoints
+  static const String complaintCreate = 'complaints/create';
+  static const String complaintUpdate = 'complaints/update';
+  static const String complaintGetAll = 'complaints/getAll';
+  static String complaintReadById(int id) => 'complaints/read/$id';
+
   // Schedule endpoints
   static String scheduleReadByDriverId(int driverId) =>
       'schedules/driver/$driverId';

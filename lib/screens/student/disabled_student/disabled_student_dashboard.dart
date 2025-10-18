@@ -1,20 +1,64 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../../../services/APIService.dart';
+import '../../../providers/auth_provider.dart';
 import 'accessible_routes.dart';
 import 'profile_page.dart';
 import 'report_issues.dart';
 import 'live_tracking.dart';
 
-class DisabledStudentDashboard extends StatelessWidget {
+class DisabledStudentDashboard extends StatefulWidget {
   const DisabledStudentDashboard({super.key});
 
   @override
+  State<DisabledStudentDashboard> createState() => _DisabledStudentDashboardState();
+}
+
+class _DisabledStudentDashboardState extends State<DisabledStudentDashboard> {
+  bool _isLoadingName = true;
+  String _displayName = '';
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadName();
+  }
+
+  Future<void> _loadName() async {
+    setState(() {
+      _isLoadingName = true;
+      _error = null;
+    });
+    try {
+      final auth = Provider.of<AuthProvider>(context, listen: false);
+      final uidStr = auth.userId;
+      if (uidStr == null || uidStr.isEmpty) throw Exception('Not logged in');
+      final uid = int.tryParse(uidStr);
+      if (uid == null) throw Exception('Invalid user id');
+      final user = await APIService().fetchUserById(uid);
+      final first = (user['first_name'] ?? user['name'] ?? '').toString();
+      final last = (user['last_name'] ?? user['surname'] ?? '').toString();
+      final combined = ('$first $last').trim();
+      setState(() {
+        _displayName = combined.isEmpty ? (user['email'] ?? '') as String? ?? '' : combined;
+      });
+    } catch (e) {
+      setState(() => _error = e.toString());
+    } finally {
+      if (mounted) setState(() => _isLoadingName = false);
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final title = _isLoadingName ? 'Welcome' : (_displayName.isNotEmpty ? 'Hi, $_displayName' : 'Welcome');
     return Scaffold(
       appBar: AppBar(
         centerTitle: true,
-        title: const Text(
-          'Welcome, Mphathi',
-          style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+        title: Text(
+          title,
+          style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
         ),
         actions: [
           IconButton(
@@ -194,4 +238,3 @@ class DisabledStudentDashboard extends StatelessWidget {
     );
   }
 }
-
