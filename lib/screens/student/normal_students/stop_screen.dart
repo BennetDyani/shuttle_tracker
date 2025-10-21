@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import '../../../widgets/dashboard_action.dart';
 import 'live_tracking_screen.dart';
 import '../../../services/APIService.dart';
 
@@ -98,6 +100,7 @@ class _StopsScreenState extends State<StopsScreen> {
       appBar: AppBar(
         title: const Text('Stops'),
         centerTitle: true,
+        actions: const [DashboardAction()],
         leading: Navigator.canPop(context)
             ? IconButton(
                 icon: const Icon(Icons.arrow_back),

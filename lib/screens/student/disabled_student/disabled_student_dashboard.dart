@@ -64,7 +64,7 @@ class _DisabledStudentDashboardState extends State<DisabledStudentDashboard> {
           IconButton(
             icon: const Icon(Icons.mic, size: 28),
             onPressed: () {
-              // TODO: Implement voice navigation
+
             },
             tooltip: 'Voice Navigation',
           ),
@@ -221,7 +221,7 @@ class _DisabledStudentDashboardState extends State<DisabledStudentDashboard> {
               child: IconButton(
                 icon: const Icon(Icons.mic, color: Colors.blue, size: 28),
                 onPressed: () {
-                  // TODO: Implement voice command
+
                 },
               ),
             ),

@@ -12,6 +12,7 @@ class LocationMessageDto {
   final double latitude;
   final double longitude;
   final String? timestamp; // ISO-8601, optional when sending
+  final String? status; // optional status string (e.g., AT_CAMPUS)
 
   LocationMessageDto({
     required this.driverId,
@@ -19,6 +20,7 @@ class LocationMessageDto {
     required this.latitude,
     required this.longitude,
     this.timestamp,
+    this.status,
   });
 
   Map<String, dynamic> toJson() => {
@@ -27,6 +29,7 @@ class LocationMessageDto {
         'latitude': latitude,
         'longitude': longitude,
         if (timestamp != null) 'timestamp': timestamp,
+        if (status != null) 'status': status,
       };
 
   factory LocationMessageDto.fromJson(Map<String, dynamic> json) =>
@@ -40,6 +43,7 @@ class LocationMessageDto {
             ? (json['longitude'] as num).toDouble()
             : double.tryParse(json['longitude']?.toString() ?? '') ?? 0.0,
         timestamp: json['timestamp']?.toString(),
+        status: json['status']?.toString(),
       );
 }
 
@@ -51,6 +55,9 @@ class LocationStompClient {
 
   StompClient? _client;
 
+  // Pending subscribers registered before the client is activated.
+  final List<void Function(LocationMessageDto msg)> _pendingLocationSubscribers = [];
+
   LocationStompClient({
     required this.websocketUrl,
     this.appPrefix = '/app',
@@ -61,15 +68,33 @@ class LocationStompClient {
   // Builds a ws/wss URL from an http/https base and a websocket endpoint path.
   // Example: http://10.0.2.2:8080 + "/ws" => ws://10.0.2.2:8080/ws
   static String buildWebSocketUrl(String httpBaseUrl, String wsPath) {
-    final uri = Uri.parse(httpBaseUrl);
-    final scheme = (uri.scheme == 'https') ? 'wss' : 'ws';
-    final normalizedPath = wsPath.startsWith('/') ? wsPath : '/$wsPath';
-    return Uri(
-      scheme: scheme,
-      host: uri.host,
-      port: uri.hasPort ? uri.port : null,
-      path: normalizedPath,
-    ).toString();
+    try {
+      // If caller already passed a full ws/wss URL, return it as-is
+      if (wsPath.startsWith('ws://') || wsPath.startsWith('wss://')) return wsPath;
+
+      final uri = Uri.parse(httpBaseUrl);
+      final scheme = (uri.scheme == 'https') ? 'wss' : 'ws';
+      final normalizedPath = wsPath.startsWith('/') ? wsPath : '/$wsPath';
+      // Preserve any base path present in apiBaseUrl (e.g., '/api')
+      final basePath = (uri.path == null || uri.path == '' || uri.path == '/') ? '' : uri.path;
+      final combined = ('$basePath$normalizedPath').replaceAll('//', '/');
+      return Uri(
+        scheme: scheme,
+        host: uri.host,
+        port: uri.hasPort ? uri.port : null,
+        path: combined,
+      ).toString();
+    } catch (_) {
+      // Fallback: try simple join
+      final scheme = httpBaseUrl.startsWith('https') ? 'wss' : 'ws';
+      final normalizedPath = wsPath.startsWith('/') ? wsPath : '/$wsPath';
+      try {
+        final u = Uri.parse(httpBaseUrl);
+        return Uri(scheme: scheme, host: u.host, port: u.hasPort ? u.port : null, path: normalizedPath).toString();
+      } catch (_) {
+        return '${scheme}://${httpBaseUrl}${wsPath}';
+      }
+    }
   }
 
   void connect({
@@ -85,6 +110,36 @@ class LocationStompClient {
       config: StompConfig(
         url: websocketUrl,
         onConnect: (frame) {
+          // Flush pending subscribers now that the client is active
+          try {
+            for (final sub in List<void Function(LocationMessageDto)>.from(_pendingLocationSubscribers)) {
+              try {
+                // Use the regular subscribe path which will call _client!.subscribe
+                _client?.subscribe(
+                  destination: '$topicPrefix/locations',
+                  callback: (StompFrame frame) {
+                    final body = frame.body;
+                    if (body == null || body.isEmpty) return;
+                    try {
+                      final decoded = json.decode(body);
+                      if (decoded is Map<String, dynamic>) {
+                        sub(LocationMessageDto.fromJson(decoded));
+                      } else if (decoded is List) {
+                        for (final item in decoded) {
+                          if (item is Map<String, dynamic>) {
+                            sub(LocationMessageDto.fromJson(item));
+                          }
+                        }
+                      }
+                    } catch (_) {}
+                  },
+                );
+              } catch (_) {}
+            }
+          } finally {
+            _pendingLocationSubscribers.clear();
+          }
+
           onConnected?.call(frame);
         },
         onWebSocketError: (dynamic err) {
@@ -107,6 +162,7 @@ class LocationStompClient {
   void disconnect() {
     _client?.deactivate();
     _client = null;
+    _pendingLocationSubscribers.clear();
   }
 
   bool get isConnected => _client?.connected == true;
@@ -115,7 +171,13 @@ class LocationStompClient {
   // The server is expected to send back LocationMessageDTOs, including timestamp set.
   void subscribeToLocations(void Function(LocationMessageDto msg) onMessage) {
     final destination = '$topicPrefix/locations';
-    _client?.subscribe(
+    // If client not yet active, queue the subscriber and it will be flushed on connect
+    if (_client == null || _client?.connected != true) {
+      _pendingLocationSubscribers.add(onMessage);
+      return;
+    }
+
+    _client!.subscribe(
       destination: destination,
       callback: (StompFrame frame) {
         final body = frame.body;
@@ -146,6 +208,7 @@ class LocationStompClient {
     required double latitude,
     required double longitude,
     String? timestampIso8601,
+    String? status,
     Map<String, String>? headers,
   }) {
     final destination = '$appPrefix/update-location';
@@ -155,6 +218,7 @@ class LocationStompClient {
       latitude: latitude,
       longitude: longitude,
       timestamp: timestampIso8601,
+      status: status,
     ).toJson();
 
     _client?.send(

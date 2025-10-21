@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../../../services/APIService.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../providers/notifications_provider.dart';
+import '../../../widgets/dashboard_action.dart';
 
 class NotificationsScreen extends StatefulWidget {
   const NotificationsScreen({super.key});
@@ -54,6 +55,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       appBar: AppBar(
         title: const Text('Notifications'),
         centerTitle: true,
+        actions: const [DashboardAction()],
       ),
       body: isLoading
           ? const Center(child: CircularProgressIndicator())

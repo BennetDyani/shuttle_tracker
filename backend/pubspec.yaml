@@ -13,3 +13,4 @@ dependencies:
   firebase_admin: ^0.2.0
   jaguar_jwt: ^3.0.0
   crypto: ^3.0.3
+  shelf_web_socket: ^1.0.0

@@ -9,6 +9,8 @@ import 'package:shuttle_tracker/models/driver_model/Driver.dart';
 import 'package:shuttle_tracker/models/driver_model/Shuttle.dart' as ShuttleModel;
 import 'package:shuttle_tracker/models/admin_model/Complaint.dart';
 import 'package:shuttle_tracker/services/logger.dart';
+import 'package:shuttle_tracker/services/endpoints.dart';
+import 'package:shuttle_tracker/screens/admin/manage_schedule.dart';
 
 // Mirrored Shuttle Model (Ideally, this should be in a shared models file)
 class Shuttle {
@@ -57,6 +59,8 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
   int totalDriversCount = 0;
   int totalShuttlesCount = 0;
   int totalComplaintsCount = 0;
+  int totalNotificationsCount = 0;
+  int complaintNotificationsCount = 0;
 
   // New: suspended accounts overview
   int suspendedAccounts = 0;
@@ -292,16 +296,21 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
         // fallback: no shuttle endpoint data, leave defaults
       }
 
+      // Ensure we fetch fresh complaints (clear any client cache), then fetch complaints
+      try { api.clearCache(Endpoints.complaintGetAll); } catch (_) {}
       // Fetch complaints
-      final complaintsData = await api.get('complaints/getAll');
+      final complaintsData = await api.get(Endpoints.complaintGetAll);
+      AppLogger.debug('Raw complaints response', data: complaintsData);
       dynamic complaintsList = complaintsData;
       if (complaintsData is Map<String, dynamic>) {
         if (complaintsData['data'] is List) complaintsList = complaintsData['data'];
         else if (complaintsData['complaints'] is List) complaintsList = complaintsData['complaints'];
       }
+      AppLogger.debug('Normalized complaints list type', data: complaintsList.runtimeType.toString());
       if (complaintsList is List) {
         try {
           final complaints = complaintsList.map((c) => Complaint.fromJson(c)).toList();
+          AppLogger.debug('Fetched complaints', data: {'count': complaints.length});
           openComplaints = complaints.where((c) => c.status.toString().toLowerCase().contains('open') || c.status.toString().toLowerCase().contains('pending')).length;
           resolvedComplaints = complaints.length - openComplaints;
           totalComplaintsCount = complaints.length;
@@ -331,6 +340,27 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
         final fallbackRecent = <Map<String, String>>[];
         fallbackRecent.add({'icon': 'info', 'desc': 'Dashboard updated', 'time': 'just now'});
         recentActivity = fallbackRecent;
+      }
+
+      // Fetch notifications (persisted) to help reconcile UI counts.
+      try {
+        // Clear notifications cache to force fresh fetch
+        try { api.clearCache(Endpoints.notificationGetAll); } catch (_) {}
+        final notifs = await api.fetchNotifications();
+        totalNotificationsCount = notifs.length;
+        // Heuristic: count notifications that likely reference complaints
+        complaintNotificationsCount = notifs.where((n) {
+          try {
+            final title = (n['title'] ?? '').toString().toLowerCase();
+            final message = (n['message'] ?? '').toString().toLowerCase();
+            return title.contains('complaint') || message.contains('complaint');
+          } catch (_) {
+            return false;
+          }
+        }).length;
+        AppLogger.debug('Fetched notifications', data: {'total': totalNotificationsCount, 'complaintRelated': complaintNotificationsCount});
+      } catch (e) {
+        AppLogger.warn('Failed to fetch notifications for dashboard debug', data: e.toString());
       }
 
       setState(() {
@@ -365,7 +395,8 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
         Navigator.pushReplacementNamed(context, '/admin/shuttles');
         break;
       case 3:
-        Navigator.pushReplacementNamed(context, '/admin/notifications');
+        // Open Manage Schedules screen
+        Navigator.pushReplacementNamed(context, '/admin/schedules');
         break;
       case 4:
         Navigator.pushReplacementNamed(context, '/admin/profile');
@@ -570,6 +601,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
         _quickActionButton('Fleet Management', Icons.directions_bus, '/admin/shuttles'),
         _quickActionButton('Send Notification', Icons.send, '/admin/notifications'),
         _quickActionButton('View Complaints', Icons.report, '/admin/complaints'),
+        _quickActionButton('Manage Schedules', Icons.schedule, '/admin/schedules'),
       ],
     );
   }
@@ -647,7 +679,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
           BottomNavigationBarItem(icon: Icon(Icons.people), label: 'Users'),
           BottomNavigationBarItem(
               icon: Icon(Icons.directions_bus), label: 'Shuttles'),
-          BottomNavigationBarItem(icon: Icon(Icons.bar_chart), label: 'Stats'),
+          BottomNavigationBarItem(icon: Icon(Icons.schedule), label: 'Schedule...'),
           BottomNavigationBarItem(
               icon: Icon(Icons.settings), label: 'Settings'),
         ],
@@ -679,6 +711,8 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
             Text('TotalDrivers=$totalDriversCount', style: const TextStyle(fontSize: 12, color: Colors.black87)),
             Text('TotalShuttles=$totalShuttlesCount', style: const TextStyle(fontSize: 12, color: Colors.black87)),
             Text('TotalComplaints=$totalComplaintsCount', style: const TextStyle(fontSize: 12, color: Colors.black87)),
+            Text('TotalNotifications=$totalNotificationsCount', style: const TextStyle(fontSize: 12, color: Colors.black87)),
+            Text('ComplaintNotifs=$complaintNotificationsCount', style: const TextStyle(fontSize: 12, color: Colors.black87)),
             if (_error != null) Text('LastError=${_error}', style: const TextStyle(fontSize: 12, color: Colors.red)),
           ],
         ),

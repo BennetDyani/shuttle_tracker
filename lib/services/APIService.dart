@@ -11,6 +11,7 @@ import 'globals.dart' as globals;
 import 'logger.dart';
 import '../providers/auth_provider.dart';
 import 'logout_helper.dart';
+import 'shuttle_service.dart';
 
 class APIService {
   // Singleton pattern
@@ -18,7 +19,11 @@ class APIService {
   factory APIService() => _instance;
   // allow injecting a custom client (useful for tests)
   http.Client httpClient = http.Client();
+  // allow overriding ShuttleService (useful for tests)
+  ShuttleService shuttleService = ShuttleService();
   APIService._internal();
+
+  void setShuttleService(ShuttleService svc) => shuttleService = svc;
 
   // Setter for tests to provide a MockClient
   void setHttpClient(http.Client client) {
@@ -397,7 +402,19 @@ class APIService {
 
   // Registration: register a new user; payload should match backend contract
   Future<dynamic> registerUser(Map<String, dynamic> payload) async {
+    // Client-side guard: require an auth token (only authenticated sessions should be able to register users).
+    // Note: role checks must be enforced server-side. This guard prevents unauthenticated public registrations.
+    if (globals.authToken == null || globals.authToken.isEmpty) {
+      throw Exception('Registration requires authentication. Only administrators can create new users.');
+    }
     return await post(Endpoints.userCreate, payload);
+  }
+
+  // Public registration: used for student self-signup (does not require an auth token)
+  Future<dynamic> registerPublic(Map<String, dynamic> payload) async {
+    // This hits the /auth/signup endpoint which returns a JWT token and user data on success.
+    final endpoint = Endpoints.authSignup;
+    return await post(endpoint, payload);
   }
 
   // Example: Create a new user (legacy; keep for compatibility)
@@ -569,11 +586,86 @@ class APIService {
   }
 
   Future<Map<String, dynamic>> fetchDriverByEmail(String email) async {
-    final endpoint = Endpoints.driverReadByEmail(email);
-    final result = await get(endpoint);
-    if (result is Map<String, dynamic>) return result;
-    if (result is Map) return Map<String, dynamic>.from(result);
-    throw Exception('Failed to fetch driver: $result');
+    final encodedEmail = Uri.encodeComponent(email);
+    final endpointsToTry = [
+      Endpoints.driverReadByEmail(encodedEmail),
+      Endpoints.driverReadByEmail(email), // raw variant
+      // Try query-param variant as a last resort
+      'drivers/readByEmail?email=$encodedEmail',
+      'drivers/readByEmail?email=$email',
+    ];
+
+    ApiException? lastApiErr;
+    for (final endpoint in endpointsToTry) {
+      try {
+        final result = await get(endpoint);
+        if (result is Map<String, dynamic>) return result;
+        if (result is Map) return Map<String, dynamic>.from(result);
+        throw Exception('Failed to fetch driver: $result');
+      } on ApiException catch (e) {
+        lastApiErr = e;
+        if (e.statusCode != 404) rethrow; // non-404 -> bubble up
+        // if 404, try next endpoint variant
+        AppLogger.warn('Driver lookup 404 for endpoint, trying alternative', data: {'endpoint': endpoint});
+        continue;
+      }
+    }
+
+    // If both variants returned 404, attempt dev seed using the user record
+    if (lastApiErr != null && lastApiErr.statusCode == 404) {
+      AppLogger.warn('Driver not found by email (both variants), attempting dev-seed using user record', data: {'email': email});
+      final userEndpoints = [
+        Endpoints.userReadByEmail(encodedEmail),
+        Endpoints.userReadByEmail(email),
+        // query param variants
+        'users/readByEmail?email=$encodedEmail',
+        'users/readByEmail?email=$email',
+      ];
+      dynamic userResult;
+      for (final ue in userEndpoints) {
+        try {
+          userResult = await get(ue);
+          break;
+        } catch (e) {
+          if (e is ApiException && e.statusCode == 404) {
+            AppLogger.debug('User lookup 404 for endpoint, trying alternative', data: {'endpoint': ue});
+            continue;
+          }
+          rethrow;
+        }
+      }
+
+      if (userResult is Map<String, dynamic> || userResult is Map) {
+        final userMap = userResult is Map<String, dynamic> ? userResult : Map<String, dynamic>.from(userResult as Map);
+        final userId = userMap['user_id'] ?? userMap['userId'] ?? userMap['id'];
+        if (userId == null) throw Exception('User found but no id present: $userMap');
+        try {
+          await shuttleService.createDriverFromUser(userId);
+        } catch (seedErr) {
+          AppLogger.warn('Dev seed attempt failed', data: seedErr.toString());
+          throw lastApiErr; // rethrow original driver-not-found
+        }
+        // After seeding attempt, retry driver lookup using endpointsToTry
+        for (final endpoint in endpointsToTry) {
+          try {
+            final retry = await get(endpoint);
+            if (retry is Map<String, dynamic>) return retry;
+            if (retry is Map) return Map<String, dynamic>.from(retry);
+          } catch (e) {
+            if (e is ApiException && e.statusCode == 404) continue;
+            rethrow;
+          }
+        }
+        throw Exception('Failed to fetch driver after seeding');
+      } else {
+        AppLogger.warn('Failed to seed driver: could not fetch user by email or seed failed', data: {'email': email, 'error': (userResult is ApiException ? userResult.toString() : userResult)});
+        throw lastApiErr;
+      }
+    }
+
+    // If we get here, rethrow last error or a generic failure
+    if (lastApiErr != null) throw lastApiErr;
+    throw Exception('Failed to fetch driver for $email');
   }
 
   // Mark a notification as read (best-effort). Clears notifications cache.

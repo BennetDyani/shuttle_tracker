@@ -1,6 +1,8 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:shuttle_tracker/services/APIService.dart';
+import 'package:provider/provider.dart';
+import '../../providers/auth_provider.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -82,15 +84,25 @@ class _RegisterScreenState extends State<RegisterScreen> {
         'email': email,
         'password': _passwordController.text,
         'phoneNumber': phone,
-        'disability': _hasDisability,
+        'hasDisability': _hasDisability,
         'role': roleString,
         'studentId': studentId,
         if (_hasDisability) 'disabilityType': _disabilityType ?? 'Other',
         if (_hasDisability) 'requiresMinibus': _requiresMinibus,
       };
 
-      await APIService().registerUser(payload);
+      // Call the public registration API
+      final loginResult = await APIService().registerPublic(payload);
       if (!mounted) return;
+      // Ingest the login result into AuthProvider
+      try {
+        // AuthProvider.ingestLoginResult accepts the raw login response and
+        // persists tokens/role/userId in the provider.
+        context.read<AuthProvider>().ingestLoginResult(loginResult);
+      } catch (_) {
+        // ignore ingestion errors; user can still continue to dashboard
+      }
+
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Registration successful')));
       if (_hasDisability) {
         Navigator.pushReplacementNamed(context, '/student/disabled/dashboard');
@@ -150,6 +162,16 @@ class _RegisterScreenState extends State<RegisterScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final auth = context.watch<AuthProvider>();
+
+    // If auth is not initialized yet, show a loader.
+    if (!auth.isInitialized) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+
+    // Public registration allowed for students. The backend validates student emails
+    // and will only accept CPUT student addresses (NNNNNNNNN@mycput.ac.za).
+
     return Scaffold(
       backgroundColor: Colors.white,
       appBar: AppBar(

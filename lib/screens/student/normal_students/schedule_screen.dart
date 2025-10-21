@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../../services/APIService.dart';
 import '../../../providers/auth_provider.dart';
+import '../../../widgets/dashboard_action.dart';
 
 class StudentScheduleScreen extends StatefulWidget {
   const StudentScheduleScreen({super.key});
@@ -192,6 +193,7 @@ class _StudentScheduleScreenState extends State<StudentScheduleScreen> {
               }
             },
           ),
+          const DashboardAction(),
         ],
       ),
       body: RefreshIndicator(

@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../../../providers/auth_provider.dart';
 
 class AccessibleRoutesScreen extends StatelessWidget {
   const AccessibleRoutesScreen({super.key});
@@ -31,6 +33,16 @@ class AccessibleRoutesScreen extends StatelessWidget {
       appBar: AppBar(
         title: const Text('Accessible Routes'),
         centerTitle: true,
+        actions: [
+          TextButton(
+            onPressed: () {
+              final role = context.read<AuthProvider>().role?.toUpperCase();
+              final route = (role == 'DISABLED_STUDENT') ? '/student/disabled/dashboard' : '/student/dashboard';
+              Navigator.pushReplacementNamed(context, route);
+            },
+            child: const Text('Dashboard', style: TextStyle(color: Colors.white)),
+          ),
+        ],
       ),
       body: ListView.builder(
         padding: const EdgeInsets.all(16),

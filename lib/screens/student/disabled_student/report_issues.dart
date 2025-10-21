@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../widgets/dashboard_action.dart';
 
 class ReportIssueScreen extends StatefulWidget {
   const ReportIssueScreen({super.key});
@@ -12,6 +13,7 @@ class _ReportIssueScreenState extends State<ReportIssueScreen> {
   String _selectedType = 'Accessibility';
   final TextEditingController _descriptionController = TextEditingController();
   bool _isUrgent = false;
+  bool _isDirty = false; // tracks unsaved changes
 
   final List<String> _types = [
     'Accessibility',
@@ -22,8 +24,21 @@ class _ReportIssueScreenState extends State<ReportIssueScreen> {
 
   @override
   void dispose() {
+    _descriptionController.removeListener(_onDescriptionChanged);
     _descriptionController.dispose();
     super.dispose();
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _descriptionController.addListener(_onDescriptionChanged);
+  }
+
+  void _onDescriptionChanged() {
+    if (!_isDirty && _descriptionController.text.isNotEmpty) {
+      setState(() => _isDirty = true);
+    }
   }
 
   void _submit() {
@@ -33,6 +48,7 @@ class _ReportIssueScreenState extends State<ReportIssueScreen> {
       setState(() {
         _selectedType = _types[0];
         _isUrgent = false;
+        _isDirty = false;
       });
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Issue reported successfully!')),
@@ -46,6 +62,9 @@ class _ReportIssueScreenState extends State<ReportIssueScreen> {
       appBar: AppBar(
         title: const Text('Report an Issue'),
         centerTitle: true,
+        actions: [
+          DashboardAction(hasUnsavedChanges: () async => _isDirty),
+        ],
       ),
       body: Padding(
         padding: const EdgeInsets.all(20.0),
@@ -61,7 +80,7 @@ class _ReportIssueScreenState extends State<ReportIssueScreen> {
                   child: Text(type),
                 )).toList(),
                 onChanged: (val) {
-                  if (val != null) setState(() => _selectedType = val);
+                  if (val != null) setState(() { _selectedType = val; _isDirty = true; });
                 },
                 decoration: const InputDecoration(
                   labelText: 'Type of issue',
@@ -78,12 +97,13 @@ class _ReportIssueScreenState extends State<ReportIssueScreen> {
                   border: OutlineInputBorder(),
                   alignLabelWithHint: true,
                 ),
+                onChanged: (_) { if (!_isDirty) setState(() => _isDirty = true); },
                 validator: (value) => value == null || value.isEmpty ? 'Please enter a description' : null,
               ),
               const SizedBox(height: 20),
               CheckboxListTile(
                 value: _isUrgent,
-                onChanged: (val) => setState(() => _isUrgent = val ?? false),
+                onChanged: (val) => setState(() { _isUrgent = val ?? false; _isDirty = true; }),
                 title: const Text('Urgent – Requires immediate attention'),
                 controlAffinity: ListTileControlAffinity.leading,
                 contentPadding: EdgeInsets.zero,
@@ -108,4 +128,3 @@ class _ReportIssueScreenState extends State<ReportIssueScreen> {
     );
   }
 }
-

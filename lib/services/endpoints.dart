@@ -12,6 +12,8 @@ class Endpoints {
 
   // Auth endpoints
   static const String authLogin = 'auth/login';
+  // New: public student signup
+  static const String authSignup = 'auth/signup';
 
   // New: Staff login endpoint
   static const String authStaffLogin = 'auth/staff-login';
@@ -99,6 +101,11 @@ class Endpoints {
   // Schedule endpoints
   static String scheduleReadByDriverId(int driverId) =>
       'schedules/driver/$driverId';
+
+  static String scheduleReadById(int scheduleId) => 'schedules/read/$scheduleId';
+
+  // Assignment endpoints
+  static String assignmentsByDriverId(int driverId) => 'assignments/driver/$driverId';
 
   // Maintenance endpoints
   static const String maintenanceReportCreate = 'maintenanceReports/create';

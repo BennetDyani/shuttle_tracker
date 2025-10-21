@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:shuttle_tracker/providers/auth_provider.dart';
 import '../../../services/APIService.dart';
 import '../../../services/logout_helper.dart';
+import '../../../widgets/dashboard_action.dart';
 
 class ProfilePage extends StatefulWidget {
   const ProfilePage({super.key});
@@ -59,6 +60,7 @@ class _ProfilePageState extends State<ProfilePage> {
                 onPressed: () => Navigator.of(context).pop(),
               )
             : null,
+        actions: const [DashboardAction()],
       ),
       body: Padding(
         padding: const EdgeInsets.all(20.0),
