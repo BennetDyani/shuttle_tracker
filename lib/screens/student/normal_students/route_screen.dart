@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../../services/APIService.dart';
+import '../../../widgets/dashboard_action.dart';
 import 'live_tracking_screen.dart';
 
 class RoutesScreen extends StatefulWidget {
@@ -66,6 +67,7 @@ class _RoutesScreenState extends State<RoutesScreen> {
                 onPressed: () => Navigator.of(context).pop(),
               )
             : null,
+        actions: const [DashboardAction()],
       ),
       body: isLoading
           ? const Center(child: CircularProgressIndicator())

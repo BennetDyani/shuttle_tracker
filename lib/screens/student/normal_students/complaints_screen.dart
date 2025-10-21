@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../services/APIService.dart';
+import '../../../widgets/dashboard_action.dart';
 
 class ComplaintsScreen extends StatefulWidget {
   const ComplaintsScreen({super.key});
@@ -77,6 +78,7 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> {
       appBar: AppBar(
         title: const Text('Feedback & Complaints'),
         centerTitle: true,
+        actions: const [DashboardAction()],
         leading: Navigator.canPop(context)
             ? IconButton(
                 icon: const Icon(Icons.arrow_back),

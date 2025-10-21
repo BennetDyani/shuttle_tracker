@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:shelf/shelf.dart';
 import 'package:shelf/shelf_io.dart';
 import 'package:shelf_router/shelf_router.dart';
+import 'package:shelf_web_socket/shelf_web_socket.dart';
 import 'package:jaguar_jwt/jaguar_jwt.dart';
 import 'package:crypto/crypto.dart';
 import 'package:postgres/postgres.dart' as pg;
@@ -17,6 +18,23 @@ import 'package:shuttle_tracker_backend/src/firebase_admin.dart';
 final db = Database();
 final firebaseAdmin = FirebaseAdminService();
 
+// In-memory set of connected WebSocket clients to broadcast location updates.
+final Set<WebSocket> _wsClients = <WebSocket>{};
+
+void _broadcastLocationMessage(Map<String, dynamic> msg) {
+  final text = jsonEncode(msg);
+  for (final ws in List<WebSocket>.from(_wsClients)) {
+    try {
+      ws.add(text);
+    } catch (e) {
+      try {
+        ws.close();
+      } catch (_) {}
+      _wsClients.remove(ws);
+    }
+  }
+}
+
 // Core app router (unprefixed)
 final _router = Router()
   // General
@@ -26,6 +44,7 @@ final _router = Router()
   // Auth
   ..post('/auth/login', _loginHandler)
   ..post('/auth/staff-login', _staffLoginHandler)
+  ..post('/auth/signup', _signupHandler)
   // Users
   ..post('/users/create', _createUserHandler)
   ..put('/users/<id>', _updateUserHandler)
@@ -64,6 +83,7 @@ final _router = Router()
   ..get('/shuttles/types', _getShuttleTypesHandler)
   // Driver Assignments
   ..post('/assignments/create', _createDriverAssignmentHandler)
+  ..post('/dev/seedDriver/<userId>', _seedDriverFromUserHandler)
   ..get('/assignments/read/<id>', _readDriverAssignmentByIdHandler)
   ..get('/assignments/driver/<driverId>', _readAssignmentsByDriverIdHandler)
   ..get('/assignments/getAll', _getAllDriverAssignmentsHandler)
@@ -81,6 +101,7 @@ final _router = Router()
   ..put('/routes/update/<id>', _updateRouteHandler)
   ..delete('/routes/delete/<id>', _deleteRouteHandler)
   ..post('/routes/<id>/stops', _addStopToRouteHandler)
+  ..post('/stops', _createStopHandler)
   ..get('/routes/<routeId>/stops', _getRouteStopsByRouteIdHandler)
   //Schedules
   ..post('/schedules/create', _createScheduleHandler)
@@ -112,7 +133,16 @@ final _router = Router()
   ..post('/maintenanceReports/create', _createMaintenanceReportHandler)
   // Location
   ..post('/location/update-location', _updateLocationHandler)
-  ..get('/location/recent', _getRecentLocationsHandler);
+  ..get('/location/recent', _getRecentLocationsHandler)
+  // WebSocket endpoint for STOMP/real-time push (simple plain WebSocket broadcast)
+  ..get('/ws', webSocketHandler((WebSocket ws) {
+    // Add client and remove on done
+    _wsClients.add(ws);
+    ws.done.then((_) {
+      _wsClients.remove(ws);
+    });
+  }))
+;
 
 // Expose routes under '/', '/api/', and '/api/v1/'
 final rootRouter = Router()
@@ -259,6 +289,117 @@ Future<Response> _staffLoginHandler(Request request) async {
     }
   } catch (e) {
     return Response.internalServerError(body: _jsonEncodeSafe({'error': 'Something went wrong'}));
+  }
+}
+
+// New: allow students to signup (self-register)
+Future<Response> _signupHandler(Request request) async {
+  if (!db.isConnected) {
+    return Response(503, body: _jsonEncodeSafe({'error': 'Database is not connected'}));
+  }
+
+  final body = await request.readAsString();
+  final params = jsonDecode(body);
+  final firstName = (params['firstName'] ?? params['name'])?.toString().trim();
+  final lastName = (params['lastName'] ?? params['surname'])?.toString().trim();
+  final email = params['email']?.toString().trim();
+  final rawPassword = params['password']?.toString();
+
+  if (firstName == null || firstName.isEmpty || lastName == null || lastName.isEmpty) {
+    return Response.badRequest(body: _jsonEncodeSafe({'error': 'Missing first name or last name'}));
+  }
+  if (email == null || email.isEmpty || rawPassword == null || rawPassword.isEmpty) {
+    return Response.badRequest(body: _jsonEncodeSafe({'error': 'Missing email or password'}));
+  }
+
+  final studentRegex = RegExp(r'^\d{9}@mycput\.ac\.za$');
+  if (!studentRegex.hasMatch(email)) {
+    return Response.badRequest(body: _jsonEncodeSafe({'error': 'Only CPUT student emails (NNNNNNNNN@mycput.ac.za) are allowed to signup here'}));
+  }
+
+  try {
+    final result = await db.transaction((ctx) async {
+      // Ensure STUDENT or DISABLED_STUDENT role exists
+      final providedRole = (params['role']?.toString().trim().toUpperCase());
+      final role = (providedRole == 'DISABLED_STUDENT') ? 'DISABLED_STUDENT' : 'STUDENT';
+
+      final roleResult = await ctx.query(
+        'SELECT role_id FROM roles WHERE role_name = @roleName',
+        substitutionValues: {'roleName': role},
+      );
+
+      if (roleResult.isEmpty) {
+        throw Exception('Role not found');
+      }
+      final roleId = roleResult.first.toColumnMap()['role_id'];
+
+      // Insert user
+      final userResult = await ctx.query(
+        'INSERT INTO users (first_name, last_name, email, password_hash, role_id) VALUES (@firstName, @lastName, @email, @password, @roleId) RETURNING user_id',
+        substitutionValues: {
+          'firstName': firstName,
+          'lastName': lastName,
+          'email': email,
+          'password': _hashPassword(rawPassword),
+          'roleId': roleId,
+        },
+      );
+      final userId = userResult.first.toColumnMap()['user_id'];
+
+      // Insert student specific row
+      final studentId = email.split('@').first; // student number
+      final phoneNumber = (params['phone_number'] ?? params['phoneNumber'])?.toString().trim();
+      final hasDisability = (params.containsKey('has_disability') ? params['has_disability'] : params['hasDisability']) ?? false;
+      final disabilityType = params['disability_type'] ?? params['disabilityType'];
+      final requiresMinibus = params['requires_minibus'] ?? params['requiresMinibus'] ?? false;
+
+      await ctx.query(
+        '''
+        INSERT INTO students (user_id, student_id, phone_number, has_disability, disability_type, requires_minibus)
+        VALUES (@userId, @studentId, @phone, @hasDisability, @disabilityType, @requiresMinibus)
+        ''',
+        substitutionValues: {
+          'userId': userId,
+          'studentId': studentId,
+          'phone': phoneNumber,
+          'hasDisability': hasDisability,
+          'disabilityType': disabilityType,
+          'requiresMinibus': requiresMinibus,
+        },
+      );
+
+      // Return created user row joined with role name
+      final finalUserResult = await ctx.query('SELECT u.*, r.role_name FROM users u JOIN roles r ON u.role_id = r.role_id WHERE u.user_id = @id', substitutionValues: {'id': userId});
+      return finalUserResult.first.toColumnMap();
+    });
+
+    // Issue JWT for the newly created user so the client can be logged in immediately
+    final user = result;
+    final claimSet = JwtClaim(
+      subject: user['user_id'].toString(),
+      issuer: 'shuttle_tracker',
+      otherClaims: <String, dynamic>{
+        'role': user['role_name'],
+      },
+      maxAge: const Duration(hours: 24),
+    );
+    final token = issueJwtHS256(claimSet, jwtSecret);
+
+    return Response.ok(_jsonEncodeSafe({
+      'token': token,
+      'user': user,
+      'role': user['role_name'],
+      'userId': user['user_id']
+    }));
+  } on pg.PostgreSQLException catch (e, st) {
+    stderr.writeln('[_signupHandler] PostgreSQLException: ${e.code} ${e.message}\n$st');
+    if (e.code == '23505') { // unique_violation
+      return Response(409, body: _jsonEncodeSafe({'error': 'A user with this email or ID already exists'}));
+    }
+    return Response.internalServerError(body: _jsonEncodeSafe({'error': 'Database error', 'code': e.code}));
+  } catch (e, st) {
+    stderr.writeln('[_signupHandler] Unexpected error: $e\n$st');
+    return Response.internalServerError(body: _jsonEncodeSafe({'error': 'An unexpected error occurred', 'message': e.toString()}));
   }
 }
 
@@ -698,7 +839,7 @@ Future<Response> _updateDriverHandler(Request request, String id) async {
       'message': 'Driver updated successfully',
       'driver': result.first.toColumnMap(),
     }));
-  } catch (e) {
+  }catch (e) {
     return Response.internalServerError(body: _jsonEncodeSafe({'error': 'Something went wrong'}));
   }
 }
@@ -757,7 +898,28 @@ Future<Response> _deleteDriverByEmailHandler(Request request, String email) asyn
 Future<Response> _getAllDriversHandler(Request request) async {
     try {
     final result = await db.query("SELECT * FROM drivers");
-    return Response.ok(_jsonEncodeSafe(result.map((row) => row.toColumnMap()).toList()));
+
+    // Enrich each driver row with its user record (if present) under the 'user' key.
+    final List<Map<String, dynamic>> out = [];
+    for (final row in result) {
+      final drv = row.toColumnMap();
+      final userId = drv['user_id'];
+      Map<String, dynamic>? userMap;
+      if (userId != null) {
+        try {
+          final ures = await db.query('SELECT * FROM users WHERE user_id = @id', substitutionValues: {'id': userId});
+          if (ures.isNotEmpty) userMap = ures.first.toColumnMap();
+        } catch (_) {
+          // ignore per-driver user lookup errors; leave userMap null
+        }
+      }
+      // Merge driver fields and attach user under 'user'
+      final merged = Map<String, dynamic>.from(drv);
+      merged['user'] = userMap;
+      out.add(merged);
+    }
+
+    return Response.ok(_jsonEncodeSafe(out));
   } catch (e) {
     return Response.internalServerError(body: _jsonEncodeSafe({'error': 'Something went wrong'}));
   }
@@ -978,13 +1140,21 @@ Future<Response> _createDriverAssignmentHandler(Request request) async {
       'message': 'Assignment created successfully',
       'assignment': result.first.toColumnMap(),
     }));
-  } catch (e) {
-    return Response.internalServerError(body: _jsonEncodeSafe({'error': 'Something went wrong'}));
+  } catch (e, st) {
+    // Log details for easier debugging during development
+    stderr.writeln('[Assignment] Failed to create assignment: $e\n$st');
+    // If this is a Postgres exception expose some helpful details (non-sensitive)
+    try {
+      return Response.internalServerError(body: _jsonEncodeSafe({'error': 'Failed to create assignment', 'details': e.toString()}));
+    } catch (_) {
+      return Response.internalServerError(body: _jsonEncodeSafe({'error': 'Failed to create assignment'}));
+    }
   }
 }
 
+// Read a single driver assignment by its assignment_id
 Future<Response> _readDriverAssignmentByIdHandler(Request request, String id) async {
-    try {
+  try {
     final result = await db.query('SELECT * FROM driver_assignments WHERE assignment_id = @id', substitutionValues: {'id': int.parse(id)});
     if (result.isNotEmpty) {
       return Response.ok(_jsonEncodeSafe(result.first.toColumnMap()));
@@ -996,45 +1166,51 @@ Future<Response> _readDriverAssignmentByIdHandler(Request request, String id) as
   }
 }
 
+// Read assignments for a given driver id
 Future<Response> _readAssignmentsByDriverIdHandler(Request request, String driverId) async {
   try {
-    final result = await db.query('SELECT * FROM driver_assignments WHERE driver_id = @driverId', substitutionValues: {'driverId': int.parse(driverId)});
+    final result = await db.query('SELECT * FROM driver_assignments WHERE driver_id = @driverId ORDER BY assignment_date DESC', substitutionValues: {'driverId': int.parse(driverId)});
     return Response.ok(_jsonEncodeSafe(result.map((row) => row.toColumnMap()).toList()));
   } catch (e) {
     return Response.internalServerError(body: _jsonEncodeSafe({'error': 'Something went wrong'}));
   }
 }
 
+// Get all driver assignments
 Future<Response> _getAllDriverAssignmentsHandler(Request request) async {
   try {
-    final result = await db.query('SELECT * FROM driver_assignments');
+    final result = await db.query('SELECT * FROM driver_assignments ORDER BY assignment_date DESC');
     return Response.ok(_jsonEncodeSafe(result.map((row) => row.toColumnMap()).toList()));
   } catch (e) {
     return Response.internalServerError(body: _jsonEncodeSafe({'error': 'Something went wrong'}));
   }
 }
 
+// Update an existing assignment by id
 Future<Response> _updateDriverAssignmentHandler(Request request, String id) async {
   final body = await request.readAsString();
   final params = jsonDecode(body);
   try {
     final result = await db.query('UPDATE driver_assignments SET driver_id = @driverId, shuttle_id = @shuttleId, schedule_id = @scheduleId, assignment_date = @date WHERE assignment_id = @id RETURNING *',
-    substitutionValues: {
-      'id': int.parse(id),
-      'driverId': params['driverId'],
-      'shuttleId': params['shuttleId'],
-      'scheduleId': params['scheduleId'],
-      'date': params['assignmentDate']
-    });
-    return Response.ok(_jsonEncodeSafe({
-      'message': 'Assignment updated successfully',
-      'assignment': result.first.toColumnMap(),
-    }));
+      substitutionValues: {
+        'id': int.parse(id),
+        'driverId': params['driverId'],
+        'shuttleId': params['shuttleId'],
+        'scheduleId': params['scheduleId'],
+        'date': params['assignmentDate']
+      }
+    );
+    if (result.isNotEmpty) {
+      return Response.ok(_jsonEncodeSafe({'message': 'Assignment updated successfully', 'assignment': result.first.toColumnMap()}));
+    } else {
+      return Response.notFound(_jsonEncodeSafe({'error': 'Assignment not found'}));
+    }
   } catch (e) {
-    return Response.internalServerError(body: _jsonEncodeSafe({'error': 'Something went wrong'}));
+    return Response.internalServerError(body: _jsonEncodeSafe({'error': 'Something went wrong', 'details': e.toString()}));
   }
 }
 
+// Delete an assignment by id
 Future<Response> _deleteDriverAssignmentByIdHandler(Request request, String id) async {
   try {
     await db.query('DELETE FROM driver_assignments WHERE assignment_id = @id', substitutionValues: {'id': int.parse(id)});
@@ -1043,7 +1219,6 @@ Future<Response> _deleteDriverAssignmentByIdHandler(Request request, String id) 
     return Response.internalServerError(body: _jsonEncodeSafe({'error': 'Something went wrong'}));
   }
 }
-
 
 // Complaint Handlers
 Future<Response> _createComplaintHandler(Request request) async {
@@ -1179,38 +1354,148 @@ Future<Response> _addStopToRouteHandler(Request request, String id) async {
   final body = await request.readAsString();
   final params = jsonDecode(body);
   try {
-    final result = await db.query('INSERT INTO stops (route_id, name, latitude, longitude, "order") VALUES (@routeId, @name, @lat, @lng, @order) RETURNING *',
-    substitutionValues: {
-      'routeId': int.parse(id),
-      'name': params['name'],
-      'lat': params['latitude'],
-      'lng': params['longitude'],
-      'order': params['order']
-    });
+    final routeId = int.parse(id);
+
+    // Ensure route exists before attempting insert so we can return a clear 404
+    final routeCheck = await db.query('SELECT route_id FROM routes WHERE route_id = @id', substitutionValues: {'id': routeId});
+    if (routeCheck.isEmpty) {
+      return Response.notFound(_jsonEncodeSafe({'error': 'Route not found'}));
+    }
+
+    final rawName = params['name'];
+    final rawLat = params['latitude'] ?? params['lat'];
+    final rawLng = params['longitude'] ?? params['lng'];
+
+    final name = rawName?.toString();
+    final latitude = (rawLat is num) ? rawLat.toDouble() : (rawLat != null ? double.tryParse(rawLat.toString()) : null);
+    final longitude = (rawLng is num) ? rawLng.toDouble() : (rawLng != null ? double.tryParse(rawLng.toString()) : null);
+
+    if (name == null || name.isEmpty) {
+      return Response.badRequest(body: _jsonEncodeSafe({'error': 'Missing stop name'}));
+    }
+    if (latitude == null || longitude == null) {
+      return Response.badRequest(body: _jsonEncodeSafe({'error': 'Missing latitude or longitude'}));
+    }
+
+    // Determine order: use provided 'order' if present, otherwise compute next sequence for the route
+    int? providedOrder;
+    if (params.containsKey('order')) {
+      final rawOrder = params['order'];
+      if (rawOrder is int) providedOrder = rawOrder;
+      else if (rawOrder is num) providedOrder = rawOrder.toInt();
+      else if (rawOrder is String) providedOrder = int.tryParse(rawOrder);
+    }
+
+    int order;
+    if (providedOrder != null) {
+      order = providedOrder;
+    } else {
+      final maxRes = await db.query('SELECT MAX("order") AS max_order FROM stops WHERE route_id = @routeId', substitutionValues: {'routeId': routeId});
+      dynamic maxRaw;
+      if (maxRes.isNotEmpty) maxRaw = maxRes.first.toColumnMap()['max_order'];
+      int? maxVal;
+      if (maxRaw is num) maxVal = maxRaw.toInt();
+      else if (maxRaw is String) maxVal = int.tryParse(maxRaw);
+      else maxVal = null;
+      order = (maxVal ?? 0) + 1;
+    }
+
+    final result = await db.query(
+      'INSERT INTO stops (route_id, name, latitude, longitude, "order") VALUES (@routeId, @name, @lat, @lng, @order) RETURNING *',
+      substitutionValues: {
+        'routeId': routeId,
+        'name': name,
+        'lat': latitude,
+        'lng': longitude,
+        'order': order,
+      },
+    );
+
     return Response.ok(_jsonEncodeSafe({
       'message': 'Stop added successfully',
       'stop': result.first.toColumnMap(),
     }));
-  } catch (e) {
-    return Response.internalServerError(body: _jsonEncodeSafe({'error': 'Something went wrong'}));
+  } on pg.PostgreSQLException catch (e, st) {
+    stderr.writeln('[_addStopToRouteHandler] PostgreSQLException: ${e.code} ${e.message}\n$st');
+    // Foreign key violation (route not found) -> 404
+    if (e.code == '23503') {
+      return Response.notFound(_jsonEncodeSafe({'error': 'Route not found'}));
+    }
+    // Not-null violation -> bad request
+    if (e.code == '23502') {
+      return Response.badRequest(body: _jsonEncodeSafe({'error': 'Missing required field', 'details': e.message}));
+    }
+    return Response.internalServerError(body: _jsonEncodeSafe({'error': 'Database error', 'code': e.code, 'message': e.message}));
+  } catch (e, st) {
+    stderr.writeln('[_addStopToRouteHandler] Unexpected error: $e\n$st');
+    return Response.internalServerError(body: _jsonEncodeSafe({'error': 'Something went wrong', 'message': e.toString()}));
   }
 }
 
+// Handler to create a stop (not tied to a specific route)
+Future<Response> _createStopHandler(Request request) async {
+  final body = await request.readAsString();
+  final params = jsonDecode(body);
+  try {
+    final name = params['name']?.toString();
+    final latitude = (params['latitude'] is num)
+        ? params['latitude'].toDouble()
+        : (params['latitude'] != null ? double.tryParse(params['latitude'].toString()) : null);
+    final longitude = (params['longitude'] is num)
+        ? params['longitude'].toDouble()
+        : (params['longitude'] != null ? double.tryParse(params['longitude'].toString()) : null);
+    final routeId = params['routeId'] != null ? int.tryParse(params['routeId'].toString()) : null;
+    final order = params['order'] != null ? int.tryParse(params['order'].toString()) : null;
+
+    if (name == null || name.isEmpty) {
+      return Response.badRequest(body: _jsonEncodeSafe({'error': 'Missing stop name'}));
+    }
+    if (latitude == null || longitude == null) {
+      return Response.badRequest(body: _jsonEncodeSafe({'error': 'Missing latitude or longitude'}));
+    }
+    if (routeId == null) {
+      return Response.badRequest(body: _jsonEncodeSafe({'error': 'Missing routeId'}));
+    }
+
+    final result = await db.query(
+      'INSERT INTO stops (route_id, name, latitude, longitude, "order") VALUES (@routeId, @name, @lat, @lng, @order) RETURNING *',
+      substitutionValues: {
+        'routeId': routeId,
+        'name': name,
+        'lat': latitude,
+        'lng': longitude,
+        'order': order ?? 1,
+      },
+    );
+    return Response.ok(_jsonEncodeSafe({
+      'message': 'Stop created successfully',
+      'stop': result.first.toColumnMap(),
+    }));
+  } catch (e) {
+    return Response.internalServerError(body: _jsonEncodeSafe({'error': 'Something went wrong', 'details': e.toString()}));
+  }
+}
+
+// Handler to get all stops for a specific route
 Future<Response> _getRouteStopsByRouteIdHandler(Request request, String routeId) async {
   try {
-    final result = await db.query('SELECT * FROM stops WHERE route_id = @routeId ORDER BY "order"', substitutionValues: {'routeId': int.parse(routeId)});
-    return Response.ok(_jsonEncodeSafe(result.map((row) => row.toColumnMap()).toList()));
+    final rid = int.tryParse(routeId);
+    if (rid == null) {
+      return Response.badRequest(body: _jsonEncodeSafe({'error': 'Invalid route id'}));
+    }
+    final res = await db.query('SELECT * FROM stops WHERE route_id = @routeId ORDER BY "order"', substitutionValues: {'routeId': rid});
+    return Response.ok(_jsonEncodeSafe(res.map((r) => r.toColumnMap()).toList()));
   } catch (e) {
     return Response.internalServerError(body: _jsonEncodeSafe({'error': 'Something went wrong'}));
   }
 }
 
-// Schedule Handlers
+// Schedules
 Future<Response> _createScheduleHandler(Request request) async {
   final body = await request.readAsString();
   final params = jsonDecode(body);
   try {
-    final result = await db.query('INSERT INTO schedules (route_id, departure_time, arrival_time, day_of_week) VALUES (@routeId, @departure, @arrival, @day) RETURNING *',
+    final result = await db.query('INSERT INTO schedules (route_id, departure_time, arrival_time, day_of_week) VALUES (@routeId, @departure, @arrival, @day) RETURNING schedule_id, route_id, departure_time::text AS departure_time, arrival_time::text AS arrival_time, day_of_week',
     substitutionValues: {
       'routeId': params['routeId'],
       'departure': params['departureTime'],
@@ -1221,14 +1506,15 @@ Future<Response> _createScheduleHandler(Request request) async {
       'message': 'Schedule created successfully',
       'schedule': result.first.toColumnMap(),
     }));
-  } catch (e) {
-    return Response.internalServerError(body: _jsonEncodeSafe({'error': 'Something went wrong'}));
+  } catch (e, st) {
+    stderr.writeln('[_createScheduleHandler] Error creating schedule: $e\n$st');
+    return Response.internalServerError(body: _jsonEncodeSafe({'error': 'Something went wrong', 'details': e.toString()}));
   }
 }
 
 Future<Response> _getScheduleByIdHandler(Request request, String id) async {
   try {
-    final result = await db.query('SELECT * FROM schedules WHERE schedule_id = @id', substitutionValues: {'id': int.parse(id)});
+    final result = await db.query('SELECT schedule_id, route_id, departure_time::text AS departure_time, arrival_time::text AS arrival_time, day_of_week FROM schedules WHERE schedule_id = @id', substitutionValues: {'id': int.parse(id)});
     if (result.isNotEmpty) {
       return Response.ok(_jsonEncodeSafe(result.first.toColumnMap()));
     } else {
@@ -1241,7 +1527,7 @@ Future<Response> _getScheduleByIdHandler(Request request, String id) async {
 
 Future<Response> _getScheduleByDriverIdHandler(Request request, String driverId) async {
   try {
-    final result = await db.query('SELECT s.* FROM schedules s JOIN driver_assignments da ON s.schedule_id = da.schedule_id WHERE da.driver_id = @driverId',
+    final result = await db.query('SELECT s.schedule_id, s.route_id, s.departure_time::text AS departure_time, s.arrival_time::text AS arrival_time, s.day_of_week FROM schedules s JOIN driver_assignments da ON s.schedule_id = da.schedule_id WHERE da.driver_id = @driverId',
     substitutionValues: {'driverId': int.parse(driverId)});
     return Response.ok(_jsonEncodeSafe(result.map((row) => row.toColumnMap()).toList()));
   } catch (e) {
@@ -1251,7 +1537,7 @@ Future<Response> _getScheduleByDriverIdHandler(Request request, String driverId)
 
 Future<Response> _getAllSchedulesHandler(Request request) async {
   try {
-    final result = await db.query('SELECT * FROM schedules');
+    final result = await db.query('SELECT schedule_id, route_id, departure_time::text AS departure_time, arrival_time::text AS arrival_time, day_of_week FROM schedules');
     return Response.ok(_jsonEncodeSafe(result.map((row) => row.toColumnMap()).toList()));
   } catch (e) {
     return Response.internalServerError(body: _jsonEncodeSafe({'error': 'Something went wrong'}));
@@ -1652,15 +1938,72 @@ Future<Response> _createMaintenanceReportHandler(Request request) async {
 
 // Location Handlers
 Future<Response> _updateLocationHandler(Request request) async {
-  // Server-side realtime location updates via Firebase are disabled in this deployment.
-  // Inform clients to use alternative mechanisms; return 410 to indicate this endpoint is not supported.
-  return Response(410, body: _jsonEncodeSafe({'error': 'Server-side realtime location updates are disabled. Use a separate realtime service or store locations in your own DB table.'}));
+  // Accept a JSON body containing location fields and broadcast to connected websocket clients.
+  try {
+    final body = await request.readAsString();
+    if (body.trim().isEmpty) return Response.badRequest(body: _jsonEncodeSafe({'error': 'Empty body'}));
+    final data = jsonDecode(body);
+    if (data is! Map<String, dynamic>) return Response.badRequest(body: _jsonEncodeSafe({'error': 'Invalid payload'}));
+
+    // Normalize keys expected by clients: driverId, shuttleId, latitude, longitude, timestamp, status
+    final msg = <String, dynamic>{
+      'driverId': data['driverId']?.toString() ?? data['driver_id']?.toString(),
+      'shuttleId': data['shuttleId']?.toString() ?? data['shuttle_id']?.toString(),
+      'latitude': data['latitude'],
+      'longitude': data['longitude'],
+      'timestamp': data['timestamp'] ?? data['ts'] ?? DateTime.now().toIso8601String(),
+      'status': data['status'],
+    };
+
+    // Broadcast to connected WS clients (if any).
+    try {
+      _broadcastLocationMessage(msg);
+    } catch (e, st) {
+      stderr.writeln('[broadcast] failed: $e\n$st');
+    }
+
+    return Response.ok(_jsonEncodeSafe({'ok': true, 'broadcasted_to': _wsClients.length, 'message': msg}));
+  } catch (e, st) {
+    stderr.writeln('[updateLocation] Unexpected error: $e\n$st');
+    return Response.internalServerError(body: _jsonEncodeSafe({'error': 'Failed to process location update', 'details': e.toString()}));
+  }
 }
 
 Response _getRecentLocationsHandler(Request request) {
   // Not implemented: return empty list to avoid breaking callers.
   return Response.ok(_jsonEncodeSafe([]));
 }
+
+// Dev helper: create a driver row for an existing user (development-only)
+Future<Response> _seedDriverFromUserHandler(Request request, String userIdStr) async {
+  final uid = int.tryParse(userIdStr);
+  if (uid == null) return Response.badRequest(body: _jsonEncodeSafe({'error': 'Invalid user id'}));
+  try {
+    // Verify user exists
+    final ures = await db.query('SELECT * FROM users WHERE user_id = @id', substitutionValues: {'id': uid});
+    if (ures.isEmpty) return Response.notFound(_jsonEncodeSafe({'error': 'User not found'}));
+
+    // If driver already exists for user, return it
+    final dres = await db.query('SELECT * FROM drivers WHERE user_id = @id', substitutionValues: {'id': uid});
+    if (dres.isNotEmpty) return Response.ok(_jsonEncodeSafe(dres.first.toColumnMap()));
+
+    // Create a dev license and insert driver
+    final license = 'DEV-LIC-${uid}-${DateTime.now().millisecondsSinceEpoch}';
+    final ires = await db.query(
+      'INSERT INTO drivers (user_id, license_number, phone_number) VALUES (@userId, @license, @phone) RETURNING *',
+      substitutionValues: {'userId': uid, 'license': license, 'phone': null},
+    );
+    final drv = ires.first.toColumnMap();
+    // Attach the user row for convenience
+    drv['user'] = ures.first.toColumnMap();
+    return Response.ok(_jsonEncodeSafe(drv));
+  } catch (e, st) {
+    stderr.writeln('[DevSeed] Failed to seed driver from user $userIdStr: $e\n$st');
+    return Response.internalServerError(body: _jsonEncodeSafe({'error': 'Failed to seed driver', 'details': e.toString()}));
+  }
+}
+
+
 
 void main(List<String> args) async {
   await db.connect();

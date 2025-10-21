@@ -179,12 +179,17 @@ class ShuttleService {
   // Create a driver assignment
   Future<Map<String, dynamic>> createDriverAssignment({required dynamic driverId, required dynamic shuttleId, required dynamic scheduleId, String? assignmentDate}) async {
     // Accept dynamic id types (int or String/UUID) and send them as-is in the request
+    // Ensure assignmentDate is date-only (YYYY-MM-DD) because the server stores DATE
+    final dateOnly = (assignmentDate != null && assignmentDate.isNotEmpty)
+        ? (assignmentDate.split('T').first)
+        : DateTime.now().toIso8601String().split('T').first;
     final body = {
       'driverId': driverId,
       'shuttleId': shuttleId,
       'scheduleId': scheduleId,
-      'assignmentDate': assignmentDate ?? DateTime.now().toIso8601String(),
+      'assignmentDate': dateOnly,
     };
+    debugPrint('[ShuttleService] POST $baseUrl/assignments/create body: $body');
     final response = await http.post(
       Uri.parse('$baseUrl/assignments/create'),
       headers: <String, String>{
@@ -197,6 +202,95 @@ class ShuttleService {
       return data['assignment'] ?? data;
     } else {
       throw Exception('Failed to create assignment: ${response.statusCode} ${response.body}');
+    }
+  }
+
+  // Dev helper: seed a driver row from an existing user id (calls backend dev endpoint)
+  Future<Map<String, dynamic>> seedDriverFromUser(int userId) async {
+    // Try several plausible endpoint variants to account for different server mounts (with/without /api, /api/v1, etc.)
+    final candidates = <Uri>[];
+    try {
+      final base = Uri.parse(baseUrl);
+      // baseUrl already includes /api by default; try that first
+      candidates.add(Uri.parse('${base.toString()}/dev/seedDriver/$userId'));
+      // try without trailing /api if present
+      final baseNoApi = base.toString().replaceFirst(RegExp(r'/api\/?$'), '');
+      candidates.add(Uri.parse('$baseNoApi/dev/seedDriver/$userId'));
+      // try api/v1 mount
+      candidates.add(Uri.parse('${baseNoApi}/api/v1/dev/seedDriver/$userId'));
+    } catch (_) {
+      // Fallback simple variants if parsing fails
+      candidates.add(Uri.parse('$baseUrl/dev/seedDriver/$userId'));
+      candidates.add(Uri.parse('http://localhost:8080/dev/seedDriver/$userId'));
+      candidates.add(Uri.parse('http://localhost:8080/api/dev/seedDriver/$userId'));
+    }
+
+    ResponseException? lastErr;
+    for (final uri in candidates) {
+      try {
+        debugPrint('[ShuttleService] Attempting seed driver POST -> $uri');
+        final response = await http.post(uri);
+        debugPrint('[ShuttleService] POST $uri -> ${response.statusCode}');
+        debugPrint('[ShuttleService] seed driver response body: ${response.body}');
+        if (response.statusCode == 200) {
+          final Map<String, dynamic> data = json.decode(response.body);
+          return data;
+        }
+        if (response.statusCode == 404) {
+          // try next candidate
+          lastErr = ResponseException(response.statusCode, response.body, uri.toString());
+          continue;
+        }
+        // For other non-200 responses, surface the server message immediately
+        throw Exception('Failed to seed driver: ${response.statusCode} ${response.body}');
+      } catch (e) {
+        if (e is ResponseException) {
+          lastErr = e;
+          continue;
+        }
+        // network/other unexpected errors: capture and try next
+        lastErr = ResponseException(-1, e.toString(), uri.toString());
+        continue;
+      }
+    }
+
+    // If we reached here, all attempts failed. Provide a helpful error message.
+    if (lastErr != null) {
+      if (lastErr.statusCode == 404) {
+        throw Exception('Dev seed endpoint not found (404). Tried endpoints: ${candidates.map((u) => u.toString()).join(', ')}. Ensure the backend is running and that the /dev/seedDriver route is available. Last response body: ${lastErr.body}');
+      }
+      throw Exception('Failed to seed driver after trying: ${candidates.map((u) => u.toString()).join(', ')}. Last error: ${lastErr.body}');
+    }
+    throw Exception('Failed to seed driver: unknown error');
+  }
+
+  // New dev-facing wrapper: create a driver row for the given user id and return the created driver object
+  Future<Map<String, dynamic>> createDriverFromUser(dynamic userId) async {
+    // Accept numeric or string ids; backend handler expects numeric but we'll forward string if needed
+    final String uidStr = userId?.toString() ?? '';
+    if (uidStr.isEmpty) throw Exception('Invalid userId: $userId');
+    final int? uidInt = int.tryParse(uidStr);
+    if (uidInt != null) {
+      return await seedDriverFromUser(uidInt);
+    }
+    // If userId isn't numeric, still attempt the endpoint using the raw string
+    try {
+      // attempt direct POST to dev endpoint variants using the string id
+      final uri = Uri.parse('$baseUrl/dev/seedDriver/$uidStr');
+      final response = await http.post(uri);
+      debugPrint('[ShuttleService] POST $uri -> ${response.statusCode}');
+      debugPrint('[ShuttleService] seed driver response body: ${response.body}');
+      if (response.statusCode == 200) {
+        final Map<String, dynamic> data = json.decode(response.body);
+        return data;
+      }
+      if (response.statusCode == 404) {
+        // fallback to the more exhaustive seeding logic which tries multiple variants
+        return await seedDriverFromUser(int.parse(uidStr)); // will throw as this is not numeric, but keeps API consistent
+      }
+      throw Exception('Failed to seed driver: ${response.statusCode} ${response.body}');
+    } catch (e) {
+      throw Exception('Failed to seed driver for userId $userId: $e');
     }
   }
 
@@ -229,7 +323,44 @@ class ShuttleService {
     debugPrint('[ShuttleService] create schedule body: ${response.body}');
     if (response.statusCode == 200) {
       final Map<String, dynamic> data = json.decode(response.body);
-      return data['schedule'] ?? data;
+      final scheduleJson = data['schedule'] ?? data;
+
+      // Normalize server response into a consistent shape expected by the UI.
+      // Backend often returns keys like schedule_id, route_id, departure_time, arrival_time, day_of_week.
+      // Different screens expect different keys (scheduleId/id, start/end, departureTime/arrivalTime, status, etc.).
+      try {
+        final Map<String, dynamic> s = (scheduleJson is Map<String, dynamic>) ? scheduleJson : Map<String, dynamic>.from(scheduleJson);
+        final dynamic sid = s['scheduleId'] ?? s['schedule_id'] ?? s['id'];
+        final dynamic rid = s['routeId'] ?? s['route_id'] ?? s['route'];
+        final String dep = (s['departureTime'] ?? s['departure_time'] ?? s['start'] ?? s['start_time'] ?? '').toString();
+        final String arr = (s['arrivalTime'] ?? s['arrival_time'] ?? s['end'] ?? s['end_time'] ?? '').toString();
+        final String day = (s['dayOfWeek'] ?? s['day_of_week'] ?? s['day'] ?? '').toString();
+
+        final normalized = <String, dynamic>{
+          'id': sid,
+          'scheduleId': sid,
+          'schedule_id': sid,
+          'routeId': rid,
+          'route_id': rid,
+          'route': rid?.toString(),
+          'departureTime': dep,
+          'departure_time': dep,
+          'arrivalTime': arr,
+          'arrival_time': arr,
+          'start': dep,
+          'end': arr,
+          'day': day,
+          'dayOfWeek': day,
+          'day_of_week': day,
+          // Default to Pending; callers may override/show assignment status separately
+          'status': s['status'] ?? 'Pending',
+          'raw': s,
+        };
+        return normalized;
+      } catch (e) {
+        // If normalization fails, return the raw schedule JSON so callers can still work with it
+        return scheduleJson as Map<String, dynamic>;
+      }
     } else {
       throw Exception('Failed to create schedule: ${response.statusCode} ${response.body}');
     }
@@ -275,5 +406,18 @@ class ShuttleService {
     debugPrint('[ShuttleService] DEBUG GET $url -> ${response.statusCode}');
     debugPrint('[ShuttleService] DEBUG body: ${response.body}');
     return {'status': response.statusCode, 'body': response.body, 'url': url};
+  }
+}
+
+class ResponseException implements Exception {
+  final int statusCode;
+  final String body;
+  final String url;
+
+  ResponseException(this.statusCode, this.body, this.url);
+
+  @override
+  String toString() {
+    return 'ResponseException(statusCode: $statusCode, body: $body, url: $url)';
   }
 }

@@ -207,7 +207,11 @@ class _LoginScreenState extends State<LoginScreen> {
                               TextSpan(
                                 text: 'Sign Up',
                                 style: TextStyle(color: theme.colorScheme.primary, decoration: TextDecoration.underline, fontWeight: FontWeight.w600),
-                                recognizer: TapGestureRecognizer()..onTap = () => Navigator.pushNamed(context, '/register'),
+                                recognizer: TapGestureRecognizer()
+                                  ..onTap = () {
+                                    // Navigate to registration screen so students can sign up
+                                    Navigator.pushNamed(context, '/register');
+                                  },
                               ),
                             ],
                           ),

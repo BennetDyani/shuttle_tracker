@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import '../../models/shuttle_model.dart';
 import '../../services/shuttle_service.dart';
+import 'manage_schedule.dart';
 
 class ManageShuttlesScreen extends StatefulWidget {
   const ManageShuttlesScreen({super.key});
@@ -568,7 +569,35 @@ class _ManageShuttlesScreenState extends State<ManageShuttlesScreen> {
     }
     if (!hasValidSchedules) {
       debugPrint('No valid schedules available to assign');
-      _showDeferredSnackBar('No schedules available. Create schedules first.');
+      // Offer to create a schedule in place so admin can continue the assign flow.
+      final create = await showDialog<bool?>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('No schedules'),
+          content: const Text('No valid schedules available to assign. Create a schedule now?'),
+          actions: [
+            TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancel')),
+            ElevatedButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Create')),
+          ],
+        ),
+      );
+
+      if (create == true) {
+        // Open the full ManageSchedule screen so admin can create schedules.
+        await Navigator.push(context, MaterialPageRoute(builder: (_) => const ManageScheduleScreen()));
+        // After returning, reload data and try again.
+        await _loadData();
+        // Re-evaluate whether schedules are available; if yes, re-open this dialog for the same shuttle.
+        final hasSchedulesNow = schedules.isNotEmpty && schedules.any((s) => s['schedule_id'] != null);
+        if (hasSchedulesNow) {
+          // Re-open the assign dialog for the same shuttle index
+          return _showAssignDriverDialog(index);
+        } else {
+          _showDeferredSnackBar('No schedules were created');
+          return;
+        }
+      }
+      // If user cancelled, just return.
       return;
     }
 
@@ -582,10 +611,10 @@ class _ManageShuttlesScreenState extends State<ManageShuttlesScreen> {
       context: outerContext,
       builder: (context) => StatefulBuilder(
         builder: (context, setStateDialog) {
-          bool working = false;
+          bool assignWorking = false;
 
-          // We need to capture and mutate selectedDriverId/selectedScheduleId and working inside the dialog.
-          return AlertDialog(
+           // We need to capture and mutate selectedDriverId/selectedScheduleId and assignWorking inside the dialog.
+           return AlertDialog(
             title: const Text('Assign Driver'),
             content: Column(
               mainAxisSize: MainAxisSize.min,
@@ -625,50 +654,132 @@ class _ManageShuttlesScreenState extends State<ManageShuttlesScreen> {
             actions: [
               TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancel')),
               Builder(builder: (ctx) {
-                final enabled = !working && selectedDriverId != null && selectedScheduleId != null;
                 return ElevatedButton(
-                  onPressed: enabled
+                  onPressed: (!assignWorking && selectedDriverId != null && selectedScheduleId != null)
                       ? () async {
-                          setStateDialog(() => working = true);
+                          setStateDialog(() => assignWorking = true);
                           try {
+                            // Prepare the id we'll send; seeding logic below may replace this value.
+                            dynamic driverIdToSend = selectedDriverId;
                             debugPrint('Creating assignment: driverId=$selectedDriverId shuttleId=${shuttle.id} scheduleId=$selectedScheduleId');
-                            final assignment = await _service.createDriverAssignment(
-                              driverId: selectedDriverId!,
-                              shuttleId: shuttle.id!,
-                              scheduleId: selectedScheduleId!,
-                            );
-                            debugPrint('Assignment created: $assignment');
 
-                            // Update local mapping to show assigned driver name immediately
-                            final driverRow = driverOptions.firstWhere((d) => d['driver_id'] == selectedDriverId, orElse: () => {});
-                            final driverName = (driverRow['name'] as String?) ?? 'Driver ${selectedDriverId}';
-                            setState(() {
-                              shuttleAssignedDriver[shuttle.id!] = driverName;
-                            });
-
-                            // Refresh data from backend to pick up assignments and other changes.
-                            await _loadData();
-                            Navigator.of(context).pop(true);
-                          } catch (e, st) {
-                            // Provide more detailed feedback and logs
-                            debugPrint('Failed to create assignment: $e');
-                            debugPrintStack(label: 'AssignDriverStack', stackTrace: st);
-
-                            // Surface backend message where possible
-                            final msg = e.toString();
-                            Navigator.of(context).pop(false);
-                            // pass error information via debug log; outer caller may show a generic failure message
-                            debugPrint('Assign driver error: $msg');
-                          } finally {
-                            // Ensure UI is re-enabled if dialog still open; use a micro-delay if needed
-                            // (if dialog closed above, this setStateDialog is a no-op)
+                            // Before creating an assignment, check for duplicates (same shuttle, schedule, and date)
+                            final String dateOnly = DateTime.now().toIso8601String().split('T').first;
                             try {
-                              setStateDialog(() => working = false);
+                              final existingAssignments = await _service.getDriverAssignments();
+                              final duplicate = existingAssignments.firstWhere(
+                                (a) {
+                                  final sid = (a['shuttle_id'] ?? a['shuttleId'] ?? a['shuttle'])?.toString();
+                                  final scid = (a['schedule_id'] ?? a['scheduleId'] ?? a['schedule'])?.toString();
+                                  final ad = (a['assignment_date'] ?? a['assignmentDate'] ?? a['date'])?.toString() ?? '';
+                                  return sid == shuttle.id!.toString() && scid == selectedScheduleId!.toString() && ad.startsWith(dateOnly);
+                                },
+                                orElse: () => {},
+                              );
+
+                              if (duplicate.isNotEmpty) {
+                                setStateDialog(() => assignWorking = false);
+                                await showDialog<void>(
+                                  context: context,
+                                  builder: (ctx2) => AlertDialog(
+                                    title: const Text('Assignment exists'),
+                                    content: const Text('An assignment already exists for this shuttle and schedule today.'),
+                                    actions: [TextButton(onPressed: () => Navigator.of(ctx2).pop(), child: const Text('OK'))],
+                                  ),
+                                );
+                                return;
+                              }
+                            } catch (e) {
+                              debugPrint('Warning: failed to fetch existing assignments for duplicate check: $e');
+                            }
+
+                            // Ensure the driver exists in backend; if not, attempt to seed from user
+                            try {
+                              Map<String, dynamic>? backendMatch;
+                              try {
+                                final backendDrivers = await _service.getDrivers();
+                                for (final bd in backendDrivers) {
+                                  final bdDriverId = bd['driver_id'] ?? bd['driverId'] ?? bd['id'];
+                                  final bdUserId = bd['user_id'] ?? bd['userId'] ?? bd['user'];
+                                  if (bdDriverId != null && bdDriverId.toString() == driverIdToSend.toString()) {
+                                    backendMatch = bd;
+                                    break;
+                                  }
+                                  if (bdUserId != null && bdUserId.toString() == driverIdToSend.toString()) {
+                                    backendMatch = bd;
+                                    break;
+                                  }
+                                }
+                              } catch (e) {
+                                debugPrint('Warning: failed to fetch backend drivers for existence check: $e');
+                              }
+
+                              if (backendMatch != null && backendMatch.isNotEmpty) {
+                                driverIdToSend = backendMatch['driver_id'] ?? backendMatch['driverId'] ?? backendMatch['id'] ?? driverIdToSend;
+                                debugPrint('Using existing backend driver id: $driverIdToSend');
+                              } else {
+                                // try to extract user id from selected option
+                                dynamic userIdForSeeding;
+                                Map<String, dynamic> sel = {};
+                                try {
+                                  sel = driverOptions.firstWhere((d) => d['driver_id']?.toString() == selectedDriverId?.toString() || d['user_id']?.toString() == selectedDriverId?.toString(), orElse: () => {});
+                                  if (sel.isNotEmpty) userIdForSeeding = sel['user_id'] ?? sel['driver_id'];
+                                } catch (_) {}
+
+                                if (userIdForSeeding != null) {
+                                  try {
+                                    debugPrint('No backend driver found; attempting to create driver from user id: $userIdForSeeding');
+                                    final seeded = await _service.createDriverFromUser(userIdForSeeding);
+                                    final seededId = seeded['driver_id'] ?? seeded['driverId'] ?? seeded['id'];
+                                    if (seededId == null) throw Exception('Seeded driver response did not include an id');
+                                    driverIdToSend = seededId;
+                                    try {
+                                      final name = (sel['name'] ?? 'Driver ${seededId}').toString();
+                                      driverOptions.add({'driver_id': seededId, 'user_id': userIdForSeeding, 'name': name});
+                                    } catch (_) {}
+                                    debugPrint('Seeded driver id: $driverIdToSend');
+                                  } catch (e) {
+                                    setStateDialog(() => assignWorking = false);
+                                    await showDialog<void>(
+                                      context: context,
+                                      builder: (ctx2) => AlertDialog(
+                                        title: const Text('Failed to create driver'),
+                                        content: Text('Could not create a driver record for the selected user: $e'),
+                                        actions: [TextButton(onPressed: () => Navigator.of(ctx2).pop(), child: const Text('OK'))],
+                                      ),
+                                    );
+                                    return;
+                                  }
+                                } else {
+                                  debugPrint('No user id available to seed driver; proceeding with provided driver id: $driverIdToSend');
+                                }
+                              }
+
+                              final assignment = await _service.createDriverAssignment(driverId: driverIdToSend, shuttleId: shuttle.id!, scheduleId: selectedScheduleId!);
+                              debugPrint('Assignment created: $assignment');
+
+                              final driverRow = driverOptions.firstWhere((d) => d['driver_id']?.toString() == driverIdToSend.toString(), orElse: () => {});
+                              final driverName = (driverRow.isNotEmpty ? (driverRow['name'] as String?) : null) ?? 'Driver ${driverIdToSend}';
+                              setState(() {
+                                shuttleAssignedDriver[shuttle.id!] = driverName;
+                              });
+
+                              await _loadData();
+                              Navigator.of(context).pop(true);
+                            } catch (e, st) {
+                              debugPrint('Failed to create assignment: $e');
+                              debugPrintStack(label: 'AssignDriverStack', stackTrace: st);
+                              Navigator.of(context).pop(false);
+                              debugPrint('Assign driver error: ${e.toString()}');
+                            }
+                          } finally {
+                            try {
+                              setStateDialog(() => assignWorking = false);
                             } catch (_) {}
                           }
                         }
                       : null,
-                  child: working
+                  child: assignWorking
                       ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, valueColor: AlwaysStoppedAnimation<Color>(Colors.white)))
                       : const Text('Assign'),
                 );
@@ -753,7 +864,7 @@ class _ManageShuttlesScreenState extends State<ManageShuttlesScreen> {
     final result = await showDialog<String?>(
        context: outerContext,
        builder: (context) => StatefulBuilder(builder: (context, setStateDialog) {
-         bool working = false;
+         bool manageWorking = false;
          // new: selectedRouteId and create-route controllers
          dynamic selectedRouteId = routes.isNotEmpty ? routes.first['route_id'] : null;
          final createRouteNameController = TextEditingController();
@@ -813,6 +924,7 @@ class _ManageShuttlesScreenState extends State<ManageShuttlesScreen> {
                  const SizedBox(height: 8),
                  ElevatedButton(
                      onPressed: () async {
+                       if (manageWorking) return;
                        final name = createRouteNameController.text.trim();
                        final desc = createRouteDescController.text.trim();
                        if (name.isEmpty) {
@@ -823,7 +935,7 @@ class _ManageShuttlesScreenState extends State<ManageShuttlesScreen> {
                          });
                          return;
                        }
-                       setStateDialog(() => working = true);
+                       setStateDialog(() => manageWorking = true);
                        try {
                          final created = await _service.createRoute(name: name, description: desc.isEmpty ? null : desc);
                          debugPrint('[ManageShuttles] Created route: $created');
@@ -841,11 +953,11 @@ class _ManageShuttlesScreenState extends State<ManageShuttlesScreen> {
                          _showDeferredSnackBar('Failed to create route: $e');
                        } finally {
                          try {
-                           setStateDialog(() => working = false);
+                           setStateDialog(() => manageWorking = false);
                          } catch (_) {}
                        }
                      },
-                     child: const Text('Create Route')),
+                     child: manageWorking ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, valueColor: AlwaysStoppedAnimation<Color>(Colors.white))) : const Text('Create Route')),
                  const Divider(),
                  const SizedBox(height: 8),
                  const Text('Create schedule'),
@@ -853,7 +965,7 @@ class _ManageShuttlesScreenState extends State<ManageShuttlesScreen> {
                  // If routes are available, allow selecting one; otherwise fall back to entering route id
                  if (routes.isNotEmpty) ...[
                    DropdownButtonFormField<dynamic>(
-                     value: (() {
+                     initialValue: (() {
                        final ids = routes.map((r) => r['route_id']?.toString()).whereType<String>().toSet();
                        return (selectedRouteId != null && ids.contains(selectedRouteId.toString())) ? selectedRouteId : null;
                      })(),
@@ -872,7 +984,7 @@ class _ManageShuttlesScreenState extends State<ManageShuttlesScreen> {
                 TextField(controller: arrivalController, decoration: const InputDecoration(labelText: 'Arrival ISO (YYYY-MM-DDTHH:MM:SS)')),
                 const SizedBox(height: 8),
                 DropdownButtonFormField<String>(
-                  value: selectedDay,
+                  initialValue: selectedDay,
                   items: ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday']
                       .map((d) => DropdownMenuItem<String>(value: d, child: Text(d)))
                       .toList(),
@@ -886,6 +998,7 @@ class _ManageShuttlesScreenState extends State<ManageShuttlesScreen> {
             TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Close')),
             ElevatedButton(
               onPressed: () async {
+                if (manageWorking) return;
                 final routeIdRaw = routes.isNotEmpty ? (selectedRouteId ?? routeController.text.trim()) : routeController.text.trim();
                 final departure = departureController.text.trim();
                 final arrival = arrivalController.text.trim();
@@ -896,7 +1009,7 @@ class _ManageShuttlesScreenState extends State<ManageShuttlesScreen> {
                   });
                   return;
                 }
-                setStateDialog(() => working = true);
+                setStateDialog(() => manageWorking = true);
                 try {
                   debugPrint('[ManageShuttles] Creating schedule route=$routeIdRaw departure=$departure arrival=$arrival day=$selectedDay');
                   final created = await _service.createSchedule(
@@ -908,17 +1021,17 @@ class _ManageShuttlesScreenState extends State<ManageShuttlesScreen> {
                   debugPrint('[ManageShuttles] Created schedule: $created');
                   await _loadData();
                   Navigator.of(context).pop('schedule_created');
-                } catch (e) {
+                 } catch (e) {
                   debugPrint('[ManageShuttles] Failed to create schedule: $e');
                   // close dialog with an error marker; outer caller will show snackbar
                   Navigator.of(context).pop('schedule_error:$e');
                  } finally {
                    try {
-                     setStateDialog(() => working = false);
+                     setStateDialog(() => manageWorking = false);
                    } catch (_) {}
                  }
-              },
-              child: const Text('Create'),
+               },
+              child: manageWorking ? const SizedBox(width:16,height:16,child:CircularProgressIndicator(strokeWidth:2,valueColor:AlwaysStoppedAnimation<Color>(Colors.white))) : const Text('Create'),
             ),
           ],
         );

@@ -71,9 +71,17 @@ class _DriverProfilePageState extends State<DriverProfilePage> {
     try {
       // Determine driver id from fetched driverRow
       final id = driverRow?['driver_id'] ?? driverRow?['driverId'];
-      if (id == null) throw Exception('Driver id missing');
-      final driverId = int.tryParse(id.toString()) ?? id;
-      await APIService().put('drivers/update/$driverId', payload);
+      if (id == null) {
+        // No driver exists yet -> create a new driver row
+        // Build a create payload expected by backend. Try to include user identification where possible.
+        // Normalize keys: backend may accept 'userId' or nested 'user' object. Keep original payload shape but remove null driverId.
+        final createPayload = Map<String, dynamic>.from(payload);
+        createPayload.remove('driverId');
+        await APIService().post(Endpoints.driverCreate, createPayload);
+      } else {
+        final driverId = int.tryParse(id.toString()) ?? id;
+        await APIService().put('drivers/update/$driverId', payload);
+      }
       await _fetchDriverProfile();
     } catch (e) {
       setState(() {

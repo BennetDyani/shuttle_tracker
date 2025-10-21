@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:shuttle_tracker/screens/admin/manage_complaints.dart';
 import 'package:shuttle_tracker/screens/admin/manage_route.dart';
 import 'package:shuttle_tracker/screens/admin/admin_dashboard.dart';
+import 'package:shuttle_tracker/screens/admin/manage_schedule.dart';
 import 'screens/authentication/login_screen.dart';
 import 'screens/auth/register_screen.dart';
 import 'screens/admin/assign_driver.dart';
@@ -17,6 +18,7 @@ import 'screens/driver/driver_dashboard.dart';
 import 'screens/ws_location_demo.dart';
 import 'screens/auth/staff_login_screen.dart';
 import 'screens/auth/admin_register_screen.dart';
+import 'screens/admin_select_route.dart';
 import 'providers/auth_provider.dart';
 import 'providers/notifications_provider.dart';
 import 'services/globals.dart' as globals;
@@ -81,6 +83,8 @@ class MyApp extends StatelessWidget {
             '/admin/assign-driver': (context) => const AssignDriverScreen(),
             '/admin/complaints': (context) => const ManageComplaintsScreen(),
             '/admin/routes': (context) => const ManageRouteScreen(),
+            '/admin/schedules': (context) => const ManageScheduleScreen(),
+            '/admin/select_route': (context) => const AdminSelectRouteScreen(),
             // Development/demo route for WebSocket STOMP testing
             '/dev/ws-demo': (context) => const WsLocationDemoScreen(),
           },
