@@ -1,41 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart';
 import 'package:provider/provider.dart';
+import 'package:carousel_slider/carousel_slider.dart';
 import '../authentication/login_screen.dart';
 import '../../providers/auth_provider.dart';
-import 'package:shuttle_tracker/services/APIService.dart';
-import 'package:shuttle_tracker/models/User.dart';
-import 'package:shuttle_tracker/models/driver_model/Driver.dart';
-import 'package:shuttle_tracker/models/driver_model/Shuttle.dart' as ShuttleModel;
-import 'package:shuttle_tracker/models/admin_model/Complaint.dart';
-import 'package:shuttle_tracker/services/logger.dart';
-import 'package:shuttle_tracker/services/endpoints.dart';
-import 'package:shuttle_tracker/screens/admin/manage_schedule.dart';
-
-// Mirrored Shuttle Model (Ideally, this should be in a shared models file)
-class Shuttle {
-  final String id;
-  String name;
-  String plateNumber;
-  int capacity;
-  String shuttleType; // "Bus", "Minibus"
-  String startingPoint;
-  String destination;
-  String? driverName;
-  String status; // "Active", "Inactive", "Maintenance"
-
-  Shuttle({
-    required this.id,
-    required this.name,
-    required this.plateNumber,
-    required this.capacity,
-    required this.shuttleType,
-    required this.startingPoint,
-    required this.destination,
-    this.driverName,
-    required this.status,
-  });
-}
+import '../../services/APIService.dart';
+import '../../services/logger.dart';
 
 class AdminHomeScreen extends StatefulWidget {
   const AdminHomeScreen({super.key});
@@ -47,38 +16,34 @@ class AdminHomeScreen extends StatefulWidget {
 class _AdminHomeScreenState extends State<AdminHomeScreen> {
   final int _selectedIndex = 0;
 
-  // Converted mock summary data to stateful variables with initial fallback values
-  int totalStudents = 3200;
-  int activeDrivers = 15;
-  int suspendedDrivers = 2;
-  int availableShuttles = 7;
-  int inServiceShuttles = 8;
-  int openComplaints = 12;
-  int resolvedComplaints = 30;
-  // Totals for debugging and summary consistency
+  // Dashboard statistics
+  int totalStudents = 0;
+  int activeDrivers = 0;
+  int suspendedDrivers = 0;
+  int availableShuttles = 0;
+  int inServiceShuttles = 0;
+  int openComplaints = 0;
+  int resolvedComplaints = 0;
+
+  // Totals for summary
   int totalDriversCount = 0;
   int totalShuttlesCount = 0;
   int totalComplaintsCount = 0;
   int totalNotificationsCount = 0;
   int complaintNotificationsCount = 0;
 
-  // New: suspended accounts overview
+  // Suspended accounts overview
   int suspendedAccounts = 0;
   List<String> suspendedAccountNames = [];
-
-  // New: preview list of suspended drivers for the Drivers section
   List<Map<String, String>> suspendedDriversPreview = [];
 
   bool _loading = true;
   String? _error;
-  // Greeting name
   String _displayName = '';
   bool _isLoadingName = true;
 
-  // Recent activity will be built from real data where possible
-  List<Map<String, String>> recentActivity = [
-    {'icon': 'info', 'desc': 'Loading recent activity...', 'time': ''},
-  ];
+  // Recent activity
+  List<Map<String, dynamic>> recentActivity = [];
 
   @override
   void initState() {
@@ -88,299 +53,336 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
   }
 
   Future<void> _loadName() async {
+    if (!mounted) return;
+
     try {
       final auth = Provider.of<AuthProvider>(context, listen: false);
       final uidStr = auth.userId;
-      if (uidStr == null || uidStr.isEmpty) return;
+      if (uidStr == null || uidStr.isEmpty) {
+        throw Exception('Not logged in');
+      }
+
       final uid = int.tryParse(uidStr);
-      if (uid == null) return;
+      if (uid == null) {
+        throw Exception('Invalid user ID');
+      }
+
       final user = await APIService().fetchUserById(uid);
-      final first = (user['first_name'] ?? user['name'] ?? '').toString();
-      final last = (user['last_name'] ?? user['surname'] ?? '').toString();
+      if (!mounted) return;
+
+      final first = (user['first_name'] ?? user['firstName'] ?? user['name'] ?? '').toString();
+      final last = (user['last_name'] ?? user['lastName'] ?? user['surname'] ?? '').toString();
       final combined = ('$first $last').trim();
+
       setState(() {
-        _displayName = combined.isEmpty ? (user['email'] ?? '') as String? ?? '' : combined;
+        _displayName = combined.isEmpty ? (user['email']?.toString() ?? 'Admin') : combined;
+        _isLoadingName = false;
       });
     } catch (e) {
-      AppLogger.warn('Failed to load admin name', data: e.toString());
-    } finally {
-      if (mounted) setState(() => _isLoadingName = false);
+      if (!mounted) return;
+      AppLogger.error('Failed to load admin name', error: e);
+      setState(() {
+        _displayName = 'Admin'; // Fallback name
+        _isLoadingName = false;
+        _error = null; // Don't show error to user
+      });
     }
   }
 
-  // Helper to parse dates from various API formats (ISO string or epoch seconds/ms)
-  DateTime? _tryParseDate(dynamic value) {
-    if (value == null) return null;
-    try {
-      if (value is String) {
-        return DateTime.tryParse(value);
-      }
-      if (value is int) {
-        // Heuristic: if value looks like seconds (10 digits), convert to ms
-        if (value.toString().length <= 10) return DateTime.fromMillisecondsSinceEpoch(value * 1000);
-        return DateTime.fromMillisecondsSinceEpoch(value);
-      }
-      if (value is double) {
-        final intVal = value.toInt();
-        if (intVal.toString().length <= 10) return DateTime.fromMillisecondsSinceEpoch(intVal * 1000);
-        return DateTime.fromMillisecondsSinceEpoch(intVal);
-      }
-    } catch (_) {}
-    return null;
-  }
-
   Future<void> _fetchDashboardData() async {
+    if (!mounted) return;
+
     setState(() {
       _loading = true;
       _error = null;
-      suspendedDriversPreview = [];
     });
 
     try {
       final api = APIService();
 
-      // We'll keep track of drivers discovered while parsing users as a fallback
-      int totalDriversFromUsers = 0;
+      // Fetch all data in parallel for better performance
+      final results = await Future.wait([
+        api.fetchShuttles(),
+        api.fetchDrivers(),
+        api.fetchUsersRaw(), // Use fetchUsersRaw to get Map objects
+        api.fetchComplaints().catchError((e) {
+          AppLogger.warn('Failed to fetch complaints: $e');
+          return <Map<String, dynamic>>[];
+        }),
+      ]);
 
-      // Fetch users (students + others)
-      final usersData = await api.get('users/getAll');
-      // Normalize wrapped responses where backend may return { data: [...] } or { users: [...] }
-      dynamic usersList = usersData;
-      if (usersData is Map<String, dynamic>) {
-        if (usersData['data'] is List) usersList = usersData['data'];
-        else if (usersData['users'] is List) usersList = usersData['users'];
-      }
-      // Continue processing only if we have a list
-      if (usersList is List) {
-        // Count students by Role if Role is included; fallback to total users
-        try {
-          final users = usersList.map((u) => User.fromJson(u)).toList();
-          totalStudents = users.where((u) => u.role.toString().contains('STUDENT')).length;
-        } catch (_) {
-          totalStudents = usersList.length;
+      if (!mounted) return;
+
+      final shuttles = results[0] as List<dynamic>;
+      final drivers = results[1] as List<dynamic>;
+      final users = results[2] as List<dynamic>;
+      final complaints = results[3] as List<Map<String, dynamic>>;
+
+      AppLogger.debug('Fetched data counts: shuttles=${shuttles.length}, drivers=${drivers.length}, users=${users.length}, complaints=${complaints.length}');
+
+      // Count shuttles by status
+      int available = 0;
+      int inService = 0;
+      int maintenance = 0;
+      int other = 0;
+
+      for (final shuttle in shuttles) {
+        if (shuttle is Map<String, dynamic>) {
+          AppLogger.debug('Shuttle data: ${shuttle.toString()}');
+          final statusName = shuttle['status_name']?.toString().toLowerCase() ??
+                           shuttle['statusName']?.toString().toLowerCase() ??
+                           shuttle['status']?.toString().toLowerCase() ?? '';
+          AppLogger.debug('Shuttle status parsed: "$statusName"');
+
+          // More comprehensive status matching
+          if (statusName.isEmpty) {
+            // If no status, assume available
+            available++;
+          } else if (statusName.contains('available') || statusName == 'active' || statusName == 'ready') {
+            available++;
+          } else if (statusName.contains('service') || statusName.contains('in_service') || statusName.contains('in-service') || statusName.contains('inservice')) {
+            inService++;
+          } else if (statusName.contains('maintenance') || statusName.contains('repair')) {
+            maintenance++;
+          } else {
+            other++;
+            AppLogger.warn('Unknown shuttle status: "$statusName"');
+          }
         }
+      }
 
-        // Compute suspended accounts from raw user objects where possible
-        try {
-          int suspendedCount = 0;
-          final List<String> suspendedNames = [];
-          int suspendedDriversCount = 0;
-          // do not redeclare totalDriversFromUsers here; update the outer-scope counter
-           final List<Map<String, String>> driversPreview = [];
+      AppLogger.debug('Shuttle counts: available=$available, inService=$inService, maintenance=$maintenance, other=$other, total=${shuttles.length}');
 
-          for (final raw in usersList) {
-            if (raw is Map<String, dynamic>) {
-              // Compute a stable display name up-front so all branches can use it
-              final name = ((raw['name'] ?? raw['first_name'] ?? raw['firstName'] ?? '')?.toString() ?? '') +
-                  ' ' +
-                  ((raw['surname'] ?? raw['last_name'] ?? raw['lastName'] ?? '')?.toString() ?? '');
-              final displayName = name.trim().isNotEmpty ? name.trim() : (raw['email']?.toString() ?? 'Unknown');
+      // Count students (users with STUDENT role)
+      int studentCount = 0;
+      int disabledStudentCount = 0;
+      int adminCount = 0;
+      int driverCount = 0;
+      int noRoleCount = 0;
 
-              final status = (raw['status'] ?? raw['user_status'] ?? raw['account_status'])?.toString().toUpperCase();
-              final boolFlag = (raw['is_suspended'] ?? raw['suspended'] ?? raw['isSuspended']) ?? false;
-              final isSuspBool = (boolFlag is bool && boolFlag) || (boolFlag is String && boolFlag.toString().toLowerCase() == 'true');
+      AppLogger.debug('Processing ${users.length} users...');
 
-              final isResigned = (raw['resigned'] == true) || (raw['is_resigned'] == true) || (status == 'RESIGNED');
-              final isSuspended = (status == 'SUSPENDED') || isSuspBool || isResigned;
+      // Log first few users as samples
+      if (users.isNotEmpty && users.length > 0) {
+        final sampleCount = users.length > 3 ? 3 : users.length;
+        AppLogger.debug('Sample user data (first $sampleCount):');
+        for (int i = 0; i < sampleCount; i++) {
+          final user = users[i];
+          if (user is Map) {
+            AppLogger.debug('  User $i (Map): ${user.toString()}');
+          } else {
+            AppLogger.debug('  User $i (${user.runtimeType}): ${user.toString()}');
+          }
+        }
+      }
 
-              if (isSuspended) {
-                suspendedCount++;
-                suspendedNames.add(displayName);
+      for (final user in users) {
+        if (user is Map<String, dynamic>) {
+          final userId = user['user_id'] ?? user['userId'] ?? user['id'];
+          final roleRaw = user['role'] ?? user['role_name'] ?? user['roleName'] ?? '';
+          final role = roleRaw.toString().toUpperCase();
 
-                // If role exists, check if driver
-                final roleStr = (raw['role'] ?? raw['role_name'])?.toString().toUpperCase() ?? '';
-                if (roleStr.contains('DRIVER')) suspendedDriversCount++;
+          AppLogger.debug('User $userId: raw role="$roleRaw", parsed role="$role", isEmpty=${role.isEmpty}');
 
-                // Try to add to recent activity if there's a suspension/resignation timestamp
-                final dt = _tryParseDate(raw['suspension_date'] ?? raw['suspended_at'] ?? raw['resigned_at'] ?? raw['updatedAt'] ?? raw['updated_at'] ?? raw['modified_at'] ?? raw['modifiedAt']);
-                final when = dt ?? DateTime.now();
-                // Only include if within last 30 days (reasonable recent window)
-                if (DateTime.now().difference(when).inDays <= 30) {
-                  recentActivity.add({
-                    'icon': 'report',
-                    'desc': '${displayName} ${isResigned ? 'resigned' : 'was suspended'}',
-                    'time': _formatTimeAgo(when),
-                  });
-                }
-              }
-              // Count drivers from users list (fallback if drivers endpoint unavailable)
-              final roleStr2 = (raw['role'] ?? raw['role_name'])?.toString().toUpperCase() ?? '';
-              if (roleStr2.contains('DRIVER')) {
-                totalDriversFromUsers++;
-                // If this driver is suspended, add a preview entry
-                final isDriverSusp = (raw['status'] ?? raw['user_status'])?.toString().toUpperCase() == 'SUSPENDED' ||
-                    (raw['is_suspended'] ?? raw['suspended'] ?? false) == true ||
-                    (raw['resigned'] == true) || (raw['is_resigned'] == true);
-                if (isDriverSusp) {
-                  final license = (raw['driver_license'] ?? raw['license'] ?? raw['driverLicense'])?.toString() ?? '-';
-                  final dt2 = _tryParseDate(raw['suspension_date'] ?? raw['suspended_at'] ?? raw['resigned_at'] ?? raw['updatedAt'] ?? raw['updated_at']);
-                  final when2 = dt2 ?? DateTime.now();
-                  driversPreview.add({'name': displayName, 'license': license, 'time': _formatTimeAgo(when2)});
-                }
-              }
+          if (role.isEmpty) {
+            noRoleCount++;
+            AppLogger.warn('User $userId has NO ROLE assigned!');
+          } else if (role.contains('STUDENT')) {
+            if (role.contains('DISABLED')) {
+              disabledStudentCount++;
+              AppLogger.debug('User $userId: DISABLED STUDENT');
+            } else {
+              AppLogger.debug('User $userId: NORMAL STUDENT');
             }
+            studentCount++;
+          } else if (role == 'ADMIN' || role == 'ADMINISTRATOR') {
+            adminCount++;
+            AppLogger.debug('User $userId: ADMIN');
+          } else if (role == 'DRIVER') {
+            driverCount++;
+            AppLogger.debug('User $userId: DRIVER');
+          } else {
+            AppLogger.warn('User $userId has UNKNOWN ROLE: "$role"');
           }
-
-          suspendedAccounts = suspendedCount;
-          suspendedAccountNames = suspendedNames;
-          // If we found a suspended drivers count from users list, prefer it
-          if (suspendedDriversCount >= 0) suspendedDrivers = suspendedDriversCount;
-          // Populate suspendedDriversPreview from driversPreview if available
-          if (driversPreview.isNotEmpty) suspendedDriversPreview = driversPreview.take(6).toList();
-          // If drivers endpoint fails later, fallback to counts from users
-          if (totalDriversFromUsers > 0) {
-            if (suspendedDrivers <= totalDriversFromUsers) activeDrivers = totalDriversFromUsers - suspendedDrivers;
-            else activeDrivers = totalDriversFromUsers;
-          }
-          // Immediately update UI and log values to help debug missing numbers
-          setState(() {});
-          AppLogger.debug('Dashboard users processed', data: {'totalStudents': totalStudents, 'suspendedAccounts': suspendedAccounts, 'suspendedDrivers': suspendedDrivers});
-        } catch (_) {
-          // ignore and keep defaults
         }
       }
-      else {
-        // usersList wasn't a list; keep defaults
-      }
 
-      // Fetch drivers
-      final driversData = await api.get('drivers/getAll');
-      // Normalize driversData similarly
-      dynamic driversList = driversData;
-      if (driversData is Map<String, dynamic>) {
-        if (driversData['data'] is List) driversList = driversData['data'];
-        else if (driversData['drivers'] is List) driversList = driversData['drivers'];
-      }
-      int totalDrivers = 0;
-      if (driversList is List) {
-        try {
-          final drivers = driversList.map((d) => Driver.fromJson(d)).toList();
-          // prefer the drivers count from endpoint when available
-          totalDrivers = drivers.length;
-        } catch (_) {
-          totalDrivers = driversList.length;
+      AppLogger.debug('User role counts', data: {
+        'students': studentCount,
+        'disabled_students': disabledStudentCount,
+        'admins': adminCount,
+        'drivers': driverCount,
+        'no_role': noRoleCount,
+        'total_users': users.length,
+      });
+
+      // Count drivers by status
+      int active = 0;
+      int suspended = 0;
+      final suspendedPreviews = <Map<String, String>>[];
+
+      AppLogger.debug('Processing ${drivers.length} drivers...');
+
+      for (final driver in drivers) {
+        if (driver is Map<String, dynamic>) {
+          AppLogger.debug('Driver raw data: ${driver.toString()}');
+
+          final status = (driver['status'] ?? '').toString().toLowerCase();
+          final driverId = driver['driver_id'] ?? driver['driverId'] ?? driver['id'];
+
+          AppLogger.debug('Driver $driverId status parsed: "$status" (empty=${status.isEmpty})');
+
+          if (status.isEmpty || status == 'active' || status == 'available') {
+            active++;
+            AppLogger.debug('Driver $driverId counted as ACTIVE');
+          } else if (status == 'suspended' || status == 'inactive') {
+            suspended++;
+            AppLogger.debug('Driver $driverId counted as SUSPENDED');
+
+            // Get driver name from user data or driver data
+            String driverName = 'Unknown Driver';
+            if (driver['user'] is Map) {
+              final user = driver['user'] as Map;
+              final firstName = user['first_name'] ?? user['firstName'] ?? '';
+              final lastName = user['last_name'] ?? user['lastName'] ?? '';
+              driverName = '$firstName $lastName'.trim();
+            }
+            if (driverName == 'Unknown Driver' || driverName.isEmpty) {
+              driverName = driver['name']?.toString() ??
+                          driver['driver_name']?.toString() ??
+                          'Driver ${driver['driver_id'] ?? driver['id']}';
+            }
+
+            suspendedPreviews.add({
+              'name': driverName,
+              'reason': driver['suspension_reason']?.toString() ??
+                       driver['suspensionReason']?.toString() ??
+                       'No reason provided'
+            });
+          } else {
+            AppLogger.warn('Driver $driverId has unknown status: "$status" - counting as active by default');
+            active++; // Default unknown statuses to active
+          }
         }
-      } else {
-        // No dedicated drivers list; fall back to counts derived from users
-        totalDrivers = totalDriversFromUsers;
       }
 
-      // Compute activeDrivers using suspendedDrivers (already derived from users above)
-      if (totalDrivers >= 0) {
-        if (suspendedDrivers >= 0 && suspendedDrivers <= totalDrivers) activeDrivers = totalDrivers - suspendedDrivers;
-        else activeDrivers = totalDrivers;
-      }
-      AppLogger.debug('Dashboard drivers processed', data: {'totalDrivers': totalDrivers, 'activeDrivers': activeDrivers, 'suspendedDrivers': suspendedDrivers});
-      totalDriversCount = totalDrivers;
+      AppLogger.debug('Driver counts: active=$active, suspended=$suspended, total=${drivers.length}');
 
-      // Fetch shuttles
-      final shuttlesData = await api.get('shuttles/getAll');
-      dynamic shuttlesList = shuttlesData;
-      if (shuttlesData is Map<String, dynamic>) {
-        if (shuttlesData['data'] is List) shuttlesList = shuttlesData['data'];
-        else if (shuttlesData['shuttles'] is List) shuttlesList = shuttlesData['shuttles'];
-      }
-      if (shuttlesList is List) {
-        try {
-          final shuttles = shuttlesList.map((s) => ShuttleModel.Shuttle.fromJson(s)).toList();
-          availableShuttles = shuttles.where((s) => s.shuttleStatus.toString().toLowerCase().contains('available') || s.shuttleStatus.toString().toLowerCase().contains('active')).length;
-          inServiceShuttles = shuttles.length - availableShuttles;
-          totalShuttlesCount = shuttles.length;
-        } catch (_) {
-          // fallback to raw count
-          availableShuttles = shuttlesList.length;
-          inServiceShuttles = 0;
-          totalShuttlesCount = shuttlesList.length;
-        }
-      } else {
-        // fallback: no shuttle endpoint data, leave defaults
-      }
+      // Process complaints
+      int open = 0;
+      int resolved = 0;
+      final recentActivityItems = <Map<String, dynamic>>[];
 
-      // Ensure we fetch fresh complaints (clear any client cache), then fetch complaints
-      try { api.clearCache(Endpoints.complaintGetAll); } catch (_) {}
-      // Fetch complaints
-      final complaintsData = await api.get(Endpoints.complaintGetAll);
-      AppLogger.debug('Raw complaints response', data: complaintsData);
-      dynamic complaintsList = complaintsData;
-      if (complaintsData is Map<String, dynamic>) {
-        if (complaintsData['data'] is List) complaintsList = complaintsData['data'];
-        else if (complaintsData['complaints'] is List) complaintsList = complaintsData['complaints'];
-      }
-      AppLogger.debug('Normalized complaints list type', data: complaintsList.runtimeType.toString());
-      if (complaintsList is List) {
-        try {
-          final complaints = complaintsList.map((c) => Complaint.fromJson(c)).toList();
-          AppLogger.debug('Fetched complaints', data: {'count': complaints.length});
-          openComplaints = complaints.where((c) => c.status.toString().toLowerCase().contains('open') || c.status.toString().toLowerCase().contains('pending')).length;
-          resolvedComplaints = complaints.length - openComplaints;
-          totalComplaintsCount = complaints.length;
+      AppLogger.debug('Processing ${complaints.length} complaints');
 
-          // Build recent activity from the most recent complaints and drivers
-          final recent = <Map<String, String>>[];
-          final recentComplaints = complaints.take(5);
-          for (final c in recentComplaints) {
-            recent.add({'icon': 'report', 'desc': '${c.subject} (by ${c.user.name})', 'time': '${_formatTimeAgo(c.createdAt)}'});
+      for (final complaint in complaints) {
+        if (complaint is Map<String, dynamic>) {
+          final status = (complaint['status'] ??
+                         complaint['status_name'] ??
+                         complaint['statusName'] ??
+                         '').toString().toLowerCase();
+
+          AppLogger.debug('Complaint status: $status');
+
+          if (status.isEmpty || status == 'open' || status == 'pending' || status == 'unread' || status == 'new') {
+            open++;
+          } else if (status == 'resolved' || status == 'closed' || status == 'read' || status == 'completed') {
+            resolved++;
           }
 
-          // Optionally add recent drivers or notifications
-          // Append to recentActivity only if we have entries
-          if (recent.isNotEmpty) recentActivity = recent + recentActivity; // keep any suspension items discovered earlier
-        } catch (_) {
-          // fallback: use raw list counts
-          openComplaints = complaintsList.length;
-          resolvedComplaints = 0;
-          totalComplaintsCount = complaintsList.length;
-        }
-      } else {
-        // fallback: no complaints endpoint data, leave defaults
-      }
+          // Add to recent activity if it's new (less than 7 days old)
+          final createdAtStr = complaint['created_at']?.toString() ??
+                              complaint['createdAt']?.toString() ??
+                              complaint['timestamp']?.toString() ??
+                              complaint['date']?.toString() ?? '';
 
-      // If we didn't populate recentActivity above, try to create basic entries from drivers or shuttles
-      if (recentActivity.isEmpty || (recentActivity.length == 1 && recentActivity[0]['desc'] == 'Loading recent activity...')) {
-        final fallbackRecent = <Map<String, String>>[];
-        fallbackRecent.add({'icon': 'info', 'desc': 'Dashboard updated', 'time': 'just now'});
-        recentActivity = fallbackRecent;
-      }
-
-      // Fetch notifications (persisted) to help reconcile UI counts.
-      try {
-        // Clear notifications cache to force fresh fetch
-        try { api.clearCache(Endpoints.notificationGetAll); } catch (_) {}
-        final notifs = await api.fetchNotifications();
-        totalNotificationsCount = notifs.length;
-        // Heuristic: count notifications that likely reference complaints
-        complaintNotificationsCount = notifs.where((n) {
-          try {
-            final title = (n['title'] ?? '').toString().toLowerCase();
-            final message = (n['message'] ?? '').toString().toLowerCase();
-            return title.contains('complaint') || message.contains('complaint');
-          } catch (_) {
-            return false;
+          DateTime? createdAt;
+          if (createdAtStr.isNotEmpty) {
+            createdAt = DateTime.tryParse(createdAtStr);
           }
-        }).length;
-        AppLogger.debug('Fetched notifications', data: {'total': totalNotificationsCount, 'complaintRelated': complaintNotificationsCount});
-      } catch (e) {
-        AppLogger.warn('Failed to fetch notifications for dashboard debug', data: e.toString());
+
+          if (createdAt != null && DateTime.now().difference(createdAt).inDays < 7) {
+            recentActivityItems.add({
+              'type': 'complaint',
+              'title': complaint['title']?.toString() ??
+                      complaint['subject']?.toString() ??
+                      'New Complaint',
+              'description': complaint['description']?.toString() ??
+                           complaint['message']?.toString() ??
+                           complaint['details']?.toString() ??
+                           'No description provided',
+              'created_at': createdAt,
+            });
+          }
+        }
       }
 
+      AppLogger.debug('Complaint counts', data: {
+        'open': open,
+        'resolved': resolved,
+        'total': complaints.length,
+        'recent_activity': recentActivityItems.length,
+      });
+
+      // Sort recent activity by date (newest first)
+      recentActivityItems.sort((a, b) {
+        final aDate = a['created_at'] as DateTime;
+        final bDate = b['created_at'] as DateTime;
+        return bDate.compareTo(aDate);
+      });
+
+      // Update state with all fetched data
+      if (!mounted) return;
       setState(() {
+        totalStudents = studentCount;
+
+        availableShuttles = available;
+        inServiceShuttles = inService;
+        totalShuttlesCount = shuttles.length;
+
+        activeDrivers = active;
+        suspendedDrivers = suspended;
+        totalDriversCount = drivers.length;
+        suspendedDriversPreview = suspendedPreviews;
+        suspendedAccounts = suspended;
+        suspendedAccountNames = suspendedPreviews.map((e) => e['name'] ?? '').toList();
+
+        openComplaints = open;
+        resolvedComplaints = resolved;
+        totalComplaintsCount = complaints.length;
+        totalNotificationsCount = complaints.length;
+        complaintNotificationsCount = open;
+
+        recentActivity = recentActivityItems;
         _loading = false;
       });
-    } catch (e) {
+
+      AppLogger.info('Dashboard data loaded', data: {
+        'students': studentCount,
+        'disabled_students': disabledStudentCount,
+        'shuttles_total': shuttles.length,
+        'shuttles_available': available,
+        'shuttles_in_service': inService,
+        'drivers_total': drivers.length,
+        'drivers_active': active,
+        'drivers_suspended': suspended,
+        'complaints_total': complaints.length,
+        'complaints_open': open,
+        'complaints_resolved': resolved,
+        'recent_activity_items': recentActivityItems.length,
+      });
+
+    } catch (e, st) {
+      AppLogger.error('Failed to fetch dashboard data', error: e);
+      AppLogger.debug('Stack trace: $st');
+      if (!mounted) return;
       setState(() {
+        _error = 'Failed to load dashboard data';
         _loading = false;
-        _error = e.toString();
       });
     }
   }
 
-  String _formatTimeAgo(DateTime dt) {
-    final diff = DateTime.now().difference(dt);
-    if (diff.inMinutes < 1) return 'just now';
-    if (diff.inMinutes < 60) return '${diff.inMinutes} min ago';
-    if (diff.inHours < 24) return '${diff.inHours} hr ago';
-    return '${diff.inDays} d ago';
-  }
 
   void _onBottomNavItemTapped(int index) {
     if (_selectedIndex == index) return;
@@ -433,32 +435,83 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
   }
 
   Widget _buildSummaryCards(BuildContext context) {
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: Row(
-        children: [
-          _summaryCard(label: 'Students', value: totalStudents.toString(), icon: Icons.person, color: Colors.blue),
-          const SizedBox(width: 10),
-          _summaryCard(label: 'Drivers (A/S)', value: '$activeDrivers/$suspendedDrivers', icon: Icons.directions_car, color: Colors.teal),
-          const SizedBox(width: 10),
-          _summaryCard(label: 'Shuttles (Avail/InSvc)', value: '$availableShuttles/$inServiceShuttles', icon: Icons.directions_bus, color: Colors.deepPurple),
-          const SizedBox(width: 10),
-          _summaryCard(label: 'Complaints (O/R)', value: '$openComplaints/$resolvedComplaints', icon: Icons.warning, color: Colors.orange),
-        ],
-      ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // For very small screens, stack cards vertically
+        if (constraints.maxWidth < 600) {
+          return Column(
+            children: [
+              _summaryCard(label: 'Students', value: totalStudents.toString(), icon: Icons.person, color: Colors.blue),
+              const SizedBox(height: 10),
+              _summaryCard(label: 'Drivers (A/S)', value: '$activeDrivers/$suspendedDrivers', icon: Icons.directions_car, color: Colors.teal),
+              const SizedBox(height: 10),
+              _summaryCard(label: 'Shuttles', value: '$totalShuttlesCount', icon: Icons.directions_bus, color: Colors.deepPurple),
+              const SizedBox(height: 10),
+              _summaryCard(label: 'Complaints', value: '$totalComplaintsCount', icon: Icons.warning, color: Colors.orange),
+            ],
+          );
+        }
+        // For wider screens, use horizontal scroll
+        return SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            children: [
+              _summaryCard(label: 'Students', value: totalStudents.toString(), icon: Icons.person, color: Colors.blue),
+              const SizedBox(width: 10),
+              _summaryCard(label: 'Drivers (A/S)', value: '$activeDrivers/$suspendedDrivers', icon: Icons.directions_car, color: Colors.teal),
+              const SizedBox(width: 10),
+              _summaryCard(label: 'Shuttles', value: '$totalShuttlesCount', icon: Icons.directions_bus, color: Colors.deepPurple),
+              const SizedBox(width: 10),
+              _summaryCard(label: 'Complaints', value: '$totalComplaintsCount', icon: Icons.warning, color: Colors.orange),
+            ],
+          ),
+        );
+      },
     );
   }
 
   Widget _buildGraphSection(BuildContext context) {
-    final theme = Theme.of(context);
+    final List<String> imageList = [
+      'assets/images/mainshuttle.jpg',
+      'assets/images/shuttle1.jpg',
+      'assets/images/shuttle2.jpg',
+      'assets/images/shuttle3.jpg',
+      'assets/images/shuttle4.jpg',
+      'assets/images/shuttle5.jpg',
+      'assets/images/shuttle6.jpg',
+      'assets/images/shuttle7.jpg',
+      'assets/images/shuttle8.jpg',
+    ];
+
     return Card(
       elevation: 1,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Container(
-        height: 180,
-        alignment: Alignment.center,
-        child: Text('Daily Shuttle Usage Trends (Graph Placeholder)',
-            style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontStyle: FontStyle.italic)),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 12.0),
+        child: CarouselSlider(
+          options: CarouselOptions(
+            height: 180,
+            autoPlay: true,
+            autoPlayInterval: const Duration(seconds: 3),
+            autoPlayAnimationDuration: const Duration(milliseconds: 800),
+            autoPlayCurve: Curves.fastOutSlowIn,
+            enlargeCenterPage: true,
+            enlargeFactor: 0.3,
+          ),
+          items: imageList.map((image) {
+            return Container(
+              margin: const EdgeInsets.symmetric(horizontal: 5.0),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(8.0),
+                child: Image.asset(
+                  image,
+                  fit: BoxFit.cover,
+                  width: double.infinity,
+                ),
+              ),
+            );
+          }).toList(),
+        ),
       ),
     );
   }
@@ -493,27 +546,82 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
 
             if (_loading) const Center(child: Padding(padding: EdgeInsets.all(12), child: CircularProgressIndicator())),
             if (_error != null) Padding(padding: const EdgeInsets.all(8.0), child: Text('Error: ' + (_error ?? ''), style: const TextStyle(color: Colors.red))),
-            if (!_loading && _error == null)
+            if (!_loading && _error == null && recentActivity.isNotEmpty)
               ListView.separated(
                 shrinkWrap: true,
                 physics: const NeverScrollableScrollPhysics(),
-                itemCount: recentActivity.length,
+                itemCount: recentActivity.length > 5 ? 5 : recentActivity.length, // Show max 5 items
                 separatorBuilder: (_, __) => const Divider(height: 1),
                 itemBuilder: (context, index) {
                   final item = recentActivity[index];
                   IconData icon;
-                  switch (item['icon']) {
-                    case 'person': icon = Icons.person; break;
-                    case 'report': icon = Icons.report; break;
-                    case 'notification': icon = Icons.notifications; break;
-                    default: icon = Icons.info;
+                  Color iconColor;
+
+                  // Determine icon based on type
+                  final type = item['type']?.toString() ?? '';
+                  switch (type) {
+                    case 'complaint':
+                      icon = Icons.report_problem;
+                      iconColor = Colors.orange;
+                      break;
+                    case 'notification':
+                      icon = Icons.notifications;
+                      iconColor = Colors.blue;
+                      break;
+                    case 'user':
+                      icon = Icons.person_add;
+                      iconColor = Colors.green;
+                      break;
+                    default:
+                      icon = Icons.info;
+                      iconColor = Colors.grey;
                   }
+
+                  // Format time ago
+                  String timeAgo = '';
+                  final createdAt = item['created_at'] as DateTime?;
+                  if (createdAt != null) {
+                    final diff = DateTime.now().difference(createdAt);
+                    if (diff.inMinutes < 1) {
+                      timeAgo = 'just now';
+                    } else if (diff.inMinutes < 60) {
+                      timeAgo = '${diff.inMinutes} min ago';
+                    } else if (diff.inHours < 24) {
+                      timeAgo = '${diff.inHours} hr ago';
+                    } else {
+                      timeAgo = '${diff.inDays} d ago';
+                    }
+                  }
+
                   return ListTile(
-                    leading: Icon(icon, color: Colors.blueGrey),
-                    title: Text(item['desc'] ?? ''),
-                    subtitle: Text(item['time'] ?? '', style: const TextStyle(fontSize: 12)),
+                    leading: Icon(icon, color: iconColor),
+                    title: Text(item['title']?.toString() ?? 'Activity'),
+                    subtitle: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (item['description']?.toString().isNotEmpty == true)
+                          Text(
+                            item['description'].toString(),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 13),
+                          ),
+                        if (timeAgo.isNotEmpty)
+                          Text(timeAgo, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                      ],
+                    ),
                   );
                 },
+              )
+            else if (!_loading && _error == null && recentActivity.isEmpty)
+              const Padding(
+                padding: EdgeInsets.all(16.0),
+                child: Center(
+                  child: Text(
+                    'No recent activity',
+                    style: TextStyle(color: Colors.grey),
+                  ),
+                ),
               ),
 
             // If there are suspended names, show a compact preview
@@ -566,13 +674,21 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
               const Text('No suspended drivers to show', style: TextStyle(color: Colors.black54))
             else
               Column(
-                children: suspendedDriversPreview.map((d) => ListTile(
+                children: suspendedDriversPreview.take(3).map((d) => ListTile(
                   dense: true,
                   contentPadding: EdgeInsets.zero,
-                  leading: const Icon(Icons.person, size: 18, color: Colors.teal),
-                  title: Text(d['name'] ?? ''),
-                  subtitle: Text('License: ${d['license'] ?? '-'} · ${d['time'] ?? ''}', style: const TextStyle(fontSize: 12)),
-                  trailing: IconButton(icon: const Icon(Icons.info_outline), onPressed: () => Navigator.pushNamed(context, '/admin/users')),
+                  leading: const Icon(Icons.person_off, size: 20, color: Colors.red),
+                  title: Text(d['name'] ?? 'Unknown Driver'),
+                  subtitle: Text(
+                    'Reason: ${d['reason'] ?? 'Not specified'}',
+                    style: const TextStyle(fontSize: 12),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  trailing: IconButton(
+                    icon: const Icon(Icons.info_outline, size: 18),
+                    onPressed: () => Navigator.pushNamed(context, '/admin/users'),
+                  ),
                 )).toList(),
               ),
           ],
@@ -594,15 +710,42 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
   }
 
   Widget _buildQuickActions(BuildContext context) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-      children: [
-        _quickActionButton('Add Driver', Icons.person_add, '/admin/users'),
-        _quickActionButton('Fleet Management', Icons.directions_bus, '/admin/shuttles'),
-        _quickActionButton('Send Notification', Icons.send, '/admin/notifications'),
-        _quickActionButton('View Complaints', Icons.report, '/admin/complaints'),
-        _quickActionButton('Manage Schedules', Icons.schedule, '/admin/schedules'),
-      ],
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth < 600) {
+          // For small screens, show buttons in a wrapped grid
+          return Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            alignment: WrapAlignment.center,
+            children: [
+              _quickActionButton('Add Driver', Icons.person_add, '/admin/users'),
+              _quickActionButton('Fleet Management', Icons.directions_bus, '/admin/shuttles'),
+              _quickActionButton('Send Notification', Icons.send, '/admin/notifications'),
+              _quickActionButton('View Complaints', Icons.report, '/admin/complaints'),
+              _quickActionButton('Manage Schedules', Icons.schedule, '/admin/schedules'),
+            ],
+          );
+        }
+        // For wider screens, keep the horizontal row
+        return SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: [
+              _quickActionButton('Add Driver', Icons.person_add, '/admin/users'),
+              const SizedBox(width: 8),
+              _quickActionButton('Fleet Management', Icons.directions_bus, '/admin/shuttles'),
+              const SizedBox(width: 8),
+              _quickActionButton('Send Notification', Icons.send, '/admin/notifications'),
+              const SizedBox(width: 8),
+              _quickActionButton('View Complaints', Icons.report, '/admin/complaints'),
+              const SizedBox(width: 8),
+              _quickActionButton('Manage Schedules', Icons.schedule, '/admin/schedules'),
+            ],
+          ),
+        );
+      },
     );
   }
 
@@ -658,9 +801,6 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             _buildSummaryCards(context),
-            // Debug panel to surface current numeric state when running in debug mode
-            if (kDebugMode) const SizedBox(height: 8),
-            if (kDebugMode) _buildDebugPanel(context),
             const SizedBox(height: 18),
             _buildGraphSection(context),
             const SizedBox(height: 18),
@@ -689,33 +829,6 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
         showUnselectedLabels: true,
         onTap: _onBottomNavItemTapped,
         type: BottomNavigationBarType.fixed,
-      ),
-    );
-  }
-
-  // Debug panel that shows current computed values to help troubleshoot missing numbers
-  Widget _buildDebugPanel(BuildContext context) {
-    return Card(
-      color: Colors.grey[50],
-      elevation: 0,
-      child: Padding(
-        padding: const EdgeInsets.all(8.0),
-        child: Wrap(
-          spacing: 12,
-          runSpacing: 8,
-          children: [
-            Text('Debug: ActiveDrivers=$activeDrivers', style: const TextStyle(fontSize: 12, color: Colors.black87)),
-            Text('SuspendedDrivers=$suspendedDrivers', style: const TextStyle(fontSize: 12, color: Colors.black87)),
-            Text('SuspendedAccounts=$suspendedAccounts', style: const TextStyle(fontSize: 12, color: Colors.black87)),
-            Text('TotalStudents=$totalStudents', style: const TextStyle(fontSize: 12, color: Colors.black87)),
-            Text('TotalDrivers=$totalDriversCount', style: const TextStyle(fontSize: 12, color: Colors.black87)),
-            Text('TotalShuttles=$totalShuttlesCount', style: const TextStyle(fontSize: 12, color: Colors.black87)),
-            Text('TotalComplaints=$totalComplaintsCount', style: const TextStyle(fontSize: 12, color: Colors.black87)),
-            Text('TotalNotifications=$totalNotificationsCount', style: const TextStyle(fontSize: 12, color: Colors.black87)),
-            Text('ComplaintNotifs=$complaintNotificationsCount', style: const TextStyle(fontSize: 12, color: Colors.black87)),
-            if (_error != null) Text('LastError=${_error}', style: const TextStyle(fontSize: 12, color: Colors.red)),
-          ],
-        ),
       ),
     );
   }

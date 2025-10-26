@@ -1,6 +1,5 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
-import '../../models/shuttle_model.dart';
+import 'package:shuttle_tracker/models/shuttle_model.dart';
 import '../../services/shuttle_service.dart';
 import 'manage_schedule.dart';
 
@@ -23,6 +22,8 @@ class _ManageShuttlesScreenState extends State<ManageShuttlesScreen> {
   List<Map<String, dynamic>> routes = []; // <-- added to hold routes
   Map<int, String> shuttleAssignedDriver = {}; // shuttleId -> driver name
   bool _loading = true;
+  String? _statusFilter;  // Added status filter
+  String? _typeFilter;    // Added type filter
 
   @override
   void initState() {
@@ -246,214 +247,178 @@ class _ManageShuttlesScreenState extends State<ManageShuttlesScreen> {
     }
   }
 
-  Color _statusColor(String status) {
-    switch (status.toLowerCase()) {
-      case 'available':
-        return Colors.blue;
-      case 'in service':
-      case 'in_service':
-        return Colors.green;
-      case 'under maintenance':
-      case 'under_maintenance':
-        return Colors.orange;
-      default:
-        return Colors.grey;
-    }
-  }
-
-  Future<void> _markMaintenance(int index) async {
-    final shuttle = shuttles[index];
-    try {
-      final statusRow = statuses.firstWhere((s) => (s['status_name'] as String).toLowerCase().contains('maintenance'), orElse: () => {});
-      final statusId = statusRow['status_id'] as int?;
-      if (statusId == null) throw Exception('Maintenance status not found');
-      final updated = await _service.updateShuttleStatus(shuttle.id!, statusId);
-      setState(() => shuttles[index] = updated);
-    } catch (e) {
-      _showDeferredSnackBar('Failed to mark maintenance: $e');
-    }
-  }
-
-  Future<void> _assignDriver(int index) async {
-    // Keep existing local assign behaviour for now. Driver assignments should use driver assignment endpoints.
-    _showAssignDriverDialog(index);
-  }
-
-  Future<void> _deleteShuttle(int index) async {
-    final shuttle = shuttles[index];
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Delete Shuttle'),
-        content: Text('Are you sure you want to delete shuttle ${shuttle.licensePlate}?'),
-        actions: [
-          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
-          ElevatedButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-            child: const Text('Delete'),
-          ),
-        ],
+  Widget _buildActionButtons(BoxConstraints constraints) {
+    final buttons = [
+      ElevatedButton.icon(
+        icon: const Icon(Icons.add),
+        label: const Text('Add Shuttle'),
+        onPressed: () => _showAddShuttleDialog(context),
       ),
-    );
-
-    if (confirm != true) return;
-
-    try {
-      await _service.deleteShuttle(shuttle.id!);
-      setState(() => shuttles.removeAt(index));
-      _showDeferredSnackBar('Shuttle deleted');
-    } catch (e) {
-      _showDeferredSnackBar('Failed to delete shuttle: $e');
-    }
-  }
-
-  // Helper: show a snackbar after a short delay to avoid overlay updates during pointer/device events
-  void _showDeferredSnackBar(String message, {Duration delay = const Duration(milliseconds: 50)}) {
-    if (!mounted) return;
-    Future.delayed(delay, () {
-      if (!mounted) return;
-      try {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
-      } catch (e) {
-        debugPrint('Failed to show snackbar: $e');
-      }
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Fleet Management'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.event_note),
-            tooltip: 'Manage Schedules',
-            onPressed: _showManageSchedulesDialog,
-          ),
-          IconButton(
-            icon: const Icon(Icons.bug_report),
-            tooltip: 'Debug: show parsed drivers/schedules',
-            onPressed: _showDebugDialog,
-          ),
-        ],
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () {
-            if (Navigator.canPop(context)) {
-              Navigator.pop(context);
-            } else {
-              Navigator.pushReplacementNamed(context, '/admin/dashboard');
-            }
-          },
+      ElevatedButton.icon(
+        icon: const Icon(Icons.schedule),
+        label: const Text('Manage Schedules'),
+        onPressed: () => Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const ManageScheduleScreen()),
         ),
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () => _showShuttleDialog(),
-        child: const Icon(Icons.add),
-        tooltip: 'Add Shuttle',
+      ElevatedButton.icon(
+        icon: const Icon(Icons.route),
+        label: const Text('Manage Routes'),
+        onPressed: () => _showManageRoutesDialog(context),
       ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : SingleChildScrollView(
-              padding: const EdgeInsets.all(16.0),
-              child: Column(
-                children: shuttles.asMap().entries.map((entry) {
-                  final index = entry.key;
-                  final shuttle = entry.value;
-                  final statusLabel = shuttle.statusName ?? shuttle.statusId.toString();
-                  final typeLabel = shuttle.typeName ?? shuttle.typeId.toString();
-                  return Card(
-                    margin: const EdgeInsets.only(bottom: 18),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                    elevation: 2,
-                    child: Padding(
-                      padding: const EdgeInsets.all(18.0),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Icon(
-                                typeLabel.toLowerCase().contains('bus') ? Icons.directions_bus : Icons.airport_shuttle,
-                                color: Colors.blue,
-                                size: 32,
-                              ),
-                              const SizedBox(width: 16),
-                              Text(
-                                shuttle.model,
-                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
-                              ),
-                              const Spacer(),
-                              Container(
-                                width: 12,
-                                height: 12,
-                                margin: const EdgeInsets.only(right: 8),
-                                decoration: BoxDecoration(
-                                  color: _statusColor(statusLabel),
-                                  shape: BoxShape.circle,
-                                ),
-                              ),
-                              // Use numeric status_id values for the inline dropdown to avoid duplicate string-value issues
-                              DropdownButton<int>(
-                                value: (() {
-                                  final ids = statuses.map((s) => (s['status_id'] ?? s['statusId']) as int?).whereType<int>().toSet();
-                                  return ids.contains(shuttle.statusId) ? shuttle.statusId : null;
-                                })(),
-                                items: statuses.map((s) => DropdownMenuItem<int>(
-                                      value: (s['status_id'] ?? s['statusId']) as int,
-                                      child: Text((s['status_name'] ?? s['statusName'] ?? '').toString()),
-                                    )).toList(),
-                                onChanged: (value) async {
-                                  if (value == null) return;
-                                  try {
-                                    final statusId = value;
-                                    final updated = await _service.updateShuttleStatus(shuttle.id!, statusId);
-                                    setState(() => shuttles[index] = updated);
-                                  } catch (e) {
-                                    _showDeferredSnackBar('Failed to update status: $e');
-                                  }
-                                },
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 10),
-                          Text('Plate: ${shuttle.licensePlate}'),
-                          Text('Capacity: ${shuttle.capacity}'),
-                          Text('Type: $typeLabel'),
-                          Text('Driver: ${shuttleAssignedDriver[shuttle.id] ?? 'Unassigned'}'),
-                          const SizedBox(height: 10),
-                          Row(
-                            children: [
-                              ElevatedButton(onPressed: () => _showShuttleDialog(editIndex: index, shuttle: shuttle), child: const Text('Edit')),
-                              const SizedBox(width: 8),
-                              ElevatedButton(onPressed: () => _markMaintenance(index), child: const Text('Mark Maintenance')),
-                              const SizedBox(width: 8),
-                              ElevatedButton(onPressed: () => _assignDriver(index), child: const Text('Assign Driver')),
-                              const SizedBox(width: 8),
-                              ElevatedButton(onPressed: () => _deleteShuttle(index), style: ElevatedButton.styleFrom(backgroundColor: Colors.red), child: const Text('Delete')),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                  );
-                }).toList(),
-              ),
-            ),
-    );
+    ];
+
+    return constraints.maxWidth < 600
+        ? Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            alignment: WrapAlignment.start,
+            children: buttons,
+          )
+        : Row(
+            mainAxisAlignment: MainAxisAlignment.start,
+            children: buttons.map((button) => Padding(
+              padding: const EdgeInsets.only(right: 8.0),
+              child: button,
+            )).toList(),
+          );
   }
 
-  Future<void> _showShuttleDialog({int? editIndex, Shuttle? shuttle}) async {
+  Widget _buildFilterSection(BoxConstraints constraints) {
+    final filters = [
+      DropdownButton<String>(
+        hint: const Text('Filter by Status'),
+        value: _statusFilter,
+        items: [
+          const DropdownMenuItem(value: null, child: Text('All Statuses')),
+          ...statuses.map((status) => DropdownMenuItem(
+            value: status['status_id']?.toString(),
+            child: Text(status['status_name'] ?? status['name'] ?? 'Status ${status['status_id']}'),
+          )),
+        ],
+        onChanged: (value) => setState(() => _statusFilter = value),
+      ),
+      const SizedBox(width: 16),
+      DropdownButton<String>(
+        hint: const Text('Filter by Type'),
+        value: _typeFilter,
+        items: [
+          const DropdownMenuItem(value: null, child: Text('All Types')),
+          ...types.map((type) => DropdownMenuItem(
+            value: type['type_id']?.toString(),
+            child: Text(type['type_name'] ?? type['name'] ?? 'Type ${type['type_id']}'),
+          )),
+        ],
+        onChanged: (value) => setState(() => _typeFilter = value),
+      ),
+    ];
+
+    return constraints.maxWidth < 600
+        ? Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: filters,
+          )
+        : Row(children: filters);
+  }
+
+  Widget _buildShuttlesList(BoxConstraints constraints) {
+    // Apply filters to the shuttle list
+    List<Shuttle> filteredShuttles = shuttles;
+
+    if (_statusFilter != null) {
+      filteredShuttles = filteredShuttles.where((shuttle) =>
+        shuttle.statusId.toString() == _statusFilter
+      ).toList();
+    }
+
+    if (_typeFilter != null) {
+      filteredShuttles = filteredShuttles.where((shuttle) =>
+        shuttle.typeId.toString() == _typeFilter
+      ).toList();
+    }
+
+    if (filteredShuttles.isEmpty) {
+      return const Center(child: Text('No shuttles found'));
+    }
+
+    return constraints.maxWidth < 800
+        ? ListView.builder(
+            itemCount: filteredShuttles.length,
+            itemBuilder: (context, index) => _buildShuttleCard(filteredShuttles[index], compact: true),
+          )
+        : GridView.builder(
+            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: constraints.maxWidth > 1200 ? 3 : 2,
+              childAspectRatio: 2,
+              crossAxisSpacing: 16,
+              mainAxisSpacing: 16,
+            ),
+            itemCount: filteredShuttles.length,
+            itemBuilder: (context, index) => _buildShuttleCard(filteredShuttles[index], compact: false),
+          );
+  }
+
+  Widget _buildShuttleCard(Shuttle shuttle, {required bool compact}) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '${shuttle.make} ${shuttle.model}',
+                        style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 4),
+                      Text('Plate: ${shuttle.licensePlate}'),
+                    ],
+                  ),
+                ),
+                PopupMenuButton<String>(
+                  itemBuilder: (context) => [
+                    const PopupMenuItem(value: 'edit', child: Text('Edit')),
+                    const PopupMenuItem(value: 'assign', child: Text('Assign Driver')),
+                    const PopupMenuItem(value: 'schedule', child: Text('Schedule')),
+                    const PopupMenuItem(value: 'maintenance', child: Text('Maintenance')),
+                  ],
+                  onSelected: (value) => _handleShuttleAction(value, shuttle),
+                ),
+              ],
+            ),
+            if (!compact) ...[
+              const Divider(),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  Chip(label: Text(shuttle.statusName ?? 'Status ${shuttle.statusId}')),
+                  Chip(label: Text('${shuttle.capacity} seats')),
+                if (shuttle.id != null)
+                  Chip(label: Text('Driver: ${shuttleAssignedDriver[shuttle.id] ?? 'Unknown'}')),
+                ],
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+  Future<void> _showAddShuttleDialog(BuildContext context) async {
     final _formKey = GlobalKey<FormState>();
-    final makeController = TextEditingController(text: shuttle?.make ?? '');
-    final modelController = TextEditingController(text: shuttle?.model ?? '');
-    final yearController = TextEditingController(text: shuttle?.year.toString() ?? '');
-    final capacityController = TextEditingController(text: shuttle?.capacity.toString() ?? '');
-    final plateController = TextEditingController(text: shuttle?.licensePlate ?? '');
-    int selectedTypeId = shuttle?.typeId ?? (types.isNotEmpty ? types.first['type_id'] as int : 1);
-    int selectedStatusId = shuttle?.statusId ?? (statuses.isNotEmpty ? statuses.first['status_id'] as int : 1);
+    final makeController = TextEditingController();
+    final modelController = TextEditingController();
+    final yearController = TextEditingController();
+    final capacityController = TextEditingController();
+    final plateController = TextEditingController();
+    int selectedTypeId = types.isNotEmpty ? types.first['type_id'] as int : 1;
+    int selectedStatusId = statuses.isNotEmpty ? statuses.first['status_id'] as int : 1;
 
     // Capture the outer context to use for SnackBars (dialog builder shadows context)
     final outerContext = context;
@@ -461,7 +426,7 @@ class _ManageShuttlesScreenState extends State<ManageShuttlesScreen> {
     final dialogResult = await showDialog<String?>(
       context: outerContext,
       builder: (context) => AlertDialog(
-        title: Text(editIndex == null ? 'Add Shuttle' : 'Edit Shuttle'),
+        title: const Text('Add Shuttle'),
         content: Form(
           key: _formKey,
           child: SingleChildScrollView(
@@ -474,19 +439,11 @@ class _ManageShuttlesScreenState extends State<ManageShuttlesScreen> {
                 TextFormField(controller: capacityController, decoration: const InputDecoration(labelText: 'Capacity'), keyboardType: TextInputType.number, validator: (v) => v == null || v.isEmpty ? 'Enter capacity' : null),
                 TextFormField(controller: plateController, decoration: const InputDecoration(labelText: 'License Plate'), validator: (v) => v == null || v.isEmpty ? 'Enter plate' : null),
                 DropdownButtonFormField<int>(
-                  initialValue: (() {
-                    final ids = types.map((t) => t['type_id'] as int).toSet();
-                    return ids.contains(selectedTypeId) ? selectedTypeId : null;
-                  })(),
                   items: types.map((t) => DropdownMenuItem<int>(value: t['type_id'] as int, child: Text((t['type_name'] ?? '').toString()))).toList(),
                   onChanged: (v) => selectedTypeId = v ?? selectedTypeId,
                   decoration: const InputDecoration(labelText: 'Type'),
                 ),
                 DropdownButtonFormField<int>(
-                  initialValue: (() {
-                    final ids = statuses.map((s) => s['status_id'] as int).toSet();
-                    return ids.contains(selectedStatusId) ? selectedStatusId : null;
-                  })(),
                   items: statuses.map((s) => DropdownMenuItem<int>(value: s['status_id'] as int, child: Text((s['status_name'] ?? '').toString()))).toList(),
                   onChanged: (v) => selectedStatusId = v ?? selectedStatusId,
                   decoration: const InputDecoration(labelText: 'Status'),
@@ -501,7 +458,6 @@ class _ManageShuttlesScreenState extends State<ManageShuttlesScreen> {
             onPressed: () async {
               if (!_formKey.currentState!.validate()) return;
               final newShuttle = Shuttle(
-                id: shuttle?.id,
                 make: makeController.text,
                 model: modelController.text,
                 year: int.tryParse(yearController.text) ?? 0,
@@ -512,16 +468,10 @@ class _ManageShuttlesScreenState extends State<ManageShuttlesScreen> {
               );
 
               try {
-                if (editIndex == null) {
-                  final created = await _service.createShuttle(newShuttle);
-                  setState(() => shuttles.insert(0, created));
-                  // return a marker so the outer caller can show the snackbar safely
-                  Navigator.of(context).pop('shuttle_added');
-                } else {
-                  final updated = await _service.updateShuttle(newShuttle.id ?? shuttles[editIndex].id!, newShuttle);
-                  setState(() => shuttles[editIndex] = updated);
-                  Navigator.of(context).pop('shuttle_updated');
-                }
+                final created = await _service.createShuttle(newShuttle);
+                setState(() => shuttles.insert(0, created));
+                // return a marker so the outer caller can show the snackbar safely
+                Navigator.of(context).pop('shuttle_added');
               } catch (e) {
                 // Return an error result; outer caller will show the snackbar
                 Navigator.of(context).pop('shuttle_error:$e');
@@ -536,11 +486,128 @@ class _ManageShuttlesScreenState extends State<ManageShuttlesScreen> {
     if (!mounted) return;
     if (dialogResult == 'shuttle_added') {
       _showDeferredSnackBar('Shuttle added');
-    } else if (dialogResult == 'shuttle_updated') {
-      _showDeferredSnackBar('Shuttle updated');
     } else if (dialogResult != null && dialogResult.startsWith('shuttle_error:')) {
       final msg = dialogResult.substring('shuttle_error:'.length);
       _showDeferredSnackBar('Failed to save shuttle: $msg');
+    }
+  }
+
+  Future<void> _showEditShuttleDialog(int index) async {
+    final shuttle = shuttles[index];
+    final _formKey = GlobalKey<FormState>();
+    final makeController = TextEditingController(text: shuttle.make);
+    final modelController = TextEditingController(text: shuttle.model);
+    final yearController = TextEditingController(text: shuttle.year.toString());
+    final capacityController = TextEditingController(text: shuttle.capacity.toString());
+    final plateController = TextEditingController(text: shuttle.licensePlate);
+    int selectedTypeId = shuttle.typeId;
+    int selectedStatusId = shuttle.statusId;
+
+    // Capture the outer context to use for SnackBars
+    final outerContext = context;
+
+    final dialogResult = await showDialog<String?>(
+      context: outerContext,
+      builder: (context) => AlertDialog(
+        title: const Text('Edit Shuttle'),
+        content: Form(
+          key: _formKey,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextFormField(
+                  controller: makeController,
+                  decoration: const InputDecoration(labelText: 'Make'),
+                  validator: (v) => v == null || v.isEmpty ? 'Enter make' : null,
+                ),
+                TextFormField(
+                  controller: modelController,
+                  decoration: const InputDecoration(labelText: 'Model'),
+                  validator: (v) => v == null || v.isEmpty ? 'Enter model' : null,
+                ),
+                TextFormField(
+                  controller: yearController,
+                  decoration: const InputDecoration(labelText: 'Year'),
+                  keyboardType: TextInputType.number,
+                  validator: (v) => v == null || v.isEmpty ? 'Enter year' : null,
+                ),
+                TextFormField(
+                  controller: capacityController,
+                  decoration: const InputDecoration(labelText: 'Capacity'),
+                  keyboardType: TextInputType.number,
+                  validator: (v) => v == null || v.isEmpty ? 'Enter capacity' : null,
+                ),
+                TextFormField(
+                  controller: plateController,
+                  decoration: const InputDecoration(labelText: 'License Plate'),
+                  validator: (v) => v == null || v.isEmpty ? 'Enter plate' : null,
+                ),
+                DropdownButtonFormField<int>(
+                  initialValue: selectedTypeId,
+                  items: types.map((t) => DropdownMenuItem<int>(
+                    value: t['type_id'] as int,
+                    child: Text((t['type_name'] ?? t['name'] ?? '').toString()),
+                  )).toList(),
+                  onChanged: (v) => selectedTypeId = v ?? selectedTypeId,
+                  decoration: const InputDecoration(labelText: 'Type'),
+                ),
+                DropdownButtonFormField<int>(
+                  initialValue: selectedStatusId,
+                  items: statuses.map((s) => DropdownMenuItem<int>(
+                    value: s['status_id'] as int,
+                    child: Text((s['status_name'] ?? s['name'] ?? '').toString()),
+                  )).toList(),
+                  onChanged: (v) => selectedStatusId = v ?? selectedStatusId,
+                  decoration: const InputDecoration(labelText: 'Status'),
+                ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              if (!_formKey.currentState!.validate()) return;
+
+              final updatedShuttle = Shuttle(
+                id: shuttle.id,
+                make: makeController.text,
+                model: modelController.text,
+                year: int.tryParse(yearController.text) ?? 0,
+                capacity: int.tryParse(capacityController.text) ?? 0,
+                licensePlate: plateController.text,
+                statusId: selectedStatusId,
+                typeId: selectedTypeId,
+                statusName: shuttle.statusName,
+                typeName: shuttle.typeName,
+              );
+
+              try {
+                final updated = await _service.updateShuttle(shuttle.id!, updatedShuttle);
+                setState(() => shuttles[index] = updated);
+                Navigator.of(context).pop('shuttle_updated');
+              } catch (e) {
+                Navigator.of(context).pop('shuttle_error:$e');
+              }
+            },
+            child: const Text('Update'),
+          ),
+        ],
+      ),
+    );
+
+    // Show snackbars from the outer context
+    if (!mounted) return;
+    if (dialogResult == 'shuttle_updated') {
+      _showDeferredSnackBar('Shuttle updated successfully');
+    } else if (dialogResult != null && dialogResult.startsWith('shuttle_error:')) {
+      final msg = dialogResult.substring('shuttle_error:'.length);
+      _showDeferredSnackBar('Failed to update shuttle: $msg');
     }
   }
 
@@ -799,252 +866,249 @@ class _ManageShuttlesScreenState extends State<ManageShuttlesScreen> {
     }
   }
 
-  void _showDebugDialog() async {
-    // fetch raw HTTP responses for drivers and schedules
-    Map<String, dynamic> driversRaw = {'status': 'n/a', 'body': 'n/a'};
-    Map<String, dynamic> schedulesRaw = {'status': 'n/a', 'body': 'n/a'};
-    try {
-      driversRaw = await _service.debugGetRaw('drivers/getAll');
-    } catch (e) {
-      driversRaw = {'status': 'error', 'body': e.toString()};
-    }
-    try {
-      schedulesRaw = await _service.debugGetRaw('schedules/getAll');
-    } catch (e) {
-      schedulesRaw = {'status': 'error', 'body': e.toString()};
-    }
-
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Debug: drivers & schedules'),
-        content: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text('Parsed driverOptions:'),
-              const SizedBox(height: 6),
-              Text(const JsonEncoder.withIndent('  ').convert(driverOptions)),
-              const SizedBox(height: 12),
-              const Text('Parsed schedules:'),
-              const SizedBox(height: 6),
-              Text(const JsonEncoder.withIndent('  ').convert(schedules)),
-              const SizedBox(height: 12),
-              const Divider(),
-              const SizedBox(height: 8),
-              const Text('Raw drivers response:'),
-              const SizedBox(height: 6),
-              Text('URL: ${driversRaw['url'] ?? 'n/a'}'),
-              Text('Status: ${driversRaw['status'] ?? 'n/a'}'),
-              const SizedBox(height: 6),
-              Text((driversRaw['body'] ?? '').toString()),
-              const SizedBox(height: 12),
-              const Text('Raw schedules response:'),
-              const SizedBox(height: 6),
-              Text('URL: ${schedulesRaw['url'] ?? 'n/a'}'),
-              Text('Status: ${schedulesRaw['status'] ?? 'n/a'}'),
-              const SizedBox(height: 6),
-              Text((schedulesRaw['body'] ?? '').toString()),
-            ],
-          ),
-        ),
-        actions: [TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Close'))],
-      ),
-    );
+  void _showDeferredSnackBar(String message, {Duration delay = const Duration(milliseconds: 50)}) {
+    if (!mounted) return;
+    Future.delayed(delay, () {
+      if (!mounted) return;
+      try {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+      } catch (e) {
+        debugPrint('Failed to show snackbar: $e');
+      }
+    });
   }
 
-  void _showManageSchedulesDialog() async {
-    final routeController = TextEditingController();
-    final departureController = TextEditingController();
-    final arrivalController = TextEditingController();
-    String selectedDay = 'Monday';
+  void _handleShuttleAction(String action, Shuttle shuttle) {
+    switch (action) {
+      case 'edit':
+        final index = shuttles.indexOf(shuttle);
+        if (index != -1) {
+          _showEditShuttleDialog(index);
+        }
+        break;
+      case 'assign':
+        final index = shuttles.indexOf(shuttle);
+        if (index != -1) {
+          _showAssignDriverDialog(index);
+        }
+        break;
+      case 'schedule':
+        _showManageSchedulesDialog();
+        break;
+      case 'maintenance':
+        final index = shuttles.indexOf(shuttle);
+        if (index != -1) {
+          _markMaintenance(index);
+        }
+        break;
+    }
+  }
 
-    final outerContext = context;
+  Future<void> _markMaintenance(int index) async {
+    final shuttle = shuttles[index];
+    try {
+      final statusRow = statuses.firstWhere((s) => (s['status_name'] as String).toLowerCase().contains('maintenance'), orElse: () => {});
+      final statusId = statusRow['status_id'] as int?;
+      if (statusId == null) throw Exception('Maintenance status not found');
+      final updated = await _service.updateShuttleStatus(shuttle.id!, statusId);
+      setState(() => shuttles[index] = updated);
+    } catch (e) {
+      _showDeferredSnackBar('Failed to mark maintenance: $e');
+    }
+  }
 
-    final result = await showDialog<String?>(
-       context: outerContext,
-       builder: (context) => StatefulBuilder(builder: (context, setStateDialog) {
-         bool manageWorking = false;
-         // new: selectedRouteId and create-route controllers
-         dynamic selectedRouteId = routes.isNotEmpty ? routes.first['route_id'] : null;
-         final createRouteNameController = TextEditingController();
-         final createRouteDescController = TextEditingController();
 
-         return AlertDialog(
-           title: const Text('Manage Schedules'),
-           content: SingleChildScrollView(
-             child: Column(
-               mainAxisSize: MainAxisSize.min,
-               crossAxisAlignment: CrossAxisAlignment.start,
-               children: [
-                 const Text('Existing schedules:'),
-                 const SizedBox(height: 8),
-                 if (schedules.isEmpty) const Text('No schedules yet'),
-                 if (schedules.isNotEmpty)
-                   SizedBox(
-                     height: 120,
-                     child: ListView.builder(
-                       itemCount: schedules.length,
-                       itemBuilder: (ctx, i) {
-                         final s = schedules[i];
-                         return ListTile(
-                           dense: true,
-                           title: Text('Schedule ${s['schedule_id'] ?? s['scheduleId'] ?? i}'),
-                           subtitle: Text(const JsonEncoder.withIndent('  ').convert(s)),
-                         );
-                       },
-                     ),
-                   ),
-                 const Divider(),
-                 const SizedBox(height: 8),
-                 const Text('Existing routes:'),
-                 const SizedBox(height: 8),
-                 if (routes.isEmpty) const Text('No routes yet'),
-                 if (routes.isNotEmpty)
-                   SizedBox(
-                     height: 100,
-                     child: ListView.builder(
-                       itemCount: routes.length,
-                       itemBuilder: (ctx, i) {
-                         final r = routes[i];
-                         return ListTile(
-                           dense: true,
-                           title: Text(r['name']?.toString() ?? 'Route ${r['route_id'] ?? i}'),
-                           subtitle: Text('ID: ${r['route_id']}'),
-                         );
-                       },
-                     ),
-                   ),
-                 const Divider(),
-                 const SizedBox(height: 8),
-                 const Text('Create route'),
-                 const SizedBox(height: 8),
-                 TextField(controller: createRouteNameController, decoration: const InputDecoration(labelText: 'Route name')),
-                 TextField(controller: createRouteDescController, decoration: const InputDecoration(labelText: 'Description (optional)')),
-                 const SizedBox(height: 8),
-                 ElevatedButton(
-                     onPressed: () async {
-                       if (manageWorking) return;
-                       final name = createRouteNameController.text.trim();
-                       final desc = createRouteDescController.text.trim();
-                       if (name.isEmpty) {
-                         // small delayed notification so we don't try to show overlays during the same pointer event
-                         Future.delayed(const Duration(milliseconds: 200), () {
-                           if (!mounted) return;
-                           _showDeferredSnackBar('Enter route name');
-                         });
-                         return;
-                       }
-                       setStateDialog(() => manageWorking = true);
-                       try {
-                         final created = await _service.createRoute(name: name, description: desc.isEmpty ? null : desc);
-                         debugPrint('[ManageShuttles] Created route: $created');
-                         await _loadData();
-                         // attempt to set the selected route to the newly created id if present
-                         final newId = created['route_id'] ?? created['routeId'] ?? created['id'];
-                         setStateDialog(() => selectedRouteId = newId ?? selectedRouteId);
-                         // notify after a short delay to avoid device update conflicts
-                         Future.delayed(const Duration(milliseconds: 200), () {
-                           if (!mounted) return;
-                           _showDeferredSnackBar('Route created');
-                         });
-                       } catch (e) {
-                         debugPrint('[ManageShuttles] Failed to create route: $e');
-                         _showDeferredSnackBar('Failed to create route: $e');
-                       } finally {
-                         try {
-                           setStateDialog(() => manageWorking = false);
-                         } catch (_) {}
-                       }
-                     },
-                     child: manageWorking ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, valueColor: AlwaysStoppedAnimation<Color>(Colors.white))) : const Text('Create Route')),
-                 const Divider(),
-                 const SizedBox(height: 8),
-                 const Text('Create schedule'),
-                 const SizedBox(height: 8),
-                 // If routes are available, allow selecting one; otherwise fall back to entering route id
-                 if (routes.isNotEmpty) ...[
-                   DropdownButtonFormField<dynamic>(
-                     initialValue: (() {
-                       final ids = routes.map((r) => r['route_id']?.toString()).whereType<String>().toSet();
-                       return (selectedRouteId != null && ids.contains(selectedRouteId.toString())) ? selectedRouteId : null;
-                     })(),
-                     items: routes
-                         .map((r) => DropdownMenuItem<dynamic>(value: r['route_id'], child: Text(r['name']?.toString() ?? r['route_id'].toString())))
-                         .toList(),
-                     onChanged: (v) => setStateDialog(() => selectedRouteId = v),
-                     decoration: const InputDecoration(labelText: 'Route'),
-                   ),
-                   const SizedBox(height: 8),
-                 ] else ...[
-                   TextField(controller: routeController, decoration: const InputDecoration(labelText: 'Route ID (numeric or string)')),
-                 ],
 
-                TextField(controller: departureController, decoration: const InputDecoration(labelText: 'Departure ISO (YYYY-MM-DDTHH:MM:SS)')),
-                TextField(controller: arrivalController, decoration: const InputDecoration(labelText: 'Arrival ISO (YYYY-MM-DDTHH:MM:SS)')),
+  Future<void> _showManageRoutesDialog(BuildContext context) async {
+    final createRouteNameController = TextEditingController();
+    final createRouteDescController = TextEditingController();
+    bool manageWorking = false;
+
+    await showDialog<void>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setStateDialog) => AlertDialog(
+          title: const Text('Manage Routes'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Existing routes:'),
                 const SizedBox(height: 8),
-                DropdownButtonFormField<String>(
-                  initialValue: selectedDay,
-                  items: ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday']
-                      .map((d) => DropdownMenuItem<String>(value: d, child: Text(d)))
-                      .toList(),
-                  onChanged: (v) => setStateDialog(() => selectedDay = v ?? selectedDay),
-                  decoration: const InputDecoration(labelText: 'Day of week'),
+                if (routes.isEmpty)
+                  const Text('No routes yet')
+                else
+                  SizedBox(
+                    height: 200,
+                    child: ListView.builder(
+                      itemCount: routes.length,
+                      itemBuilder: (context, index) {
+                        final route = routes[index];
+                        return ListTile(
+                          title: Text(route['name']?.toString() ?? 'Route ${route['route_id']}'),
+                          subtitle: Text('ID: ${route['route_id']}'),
+                        );
+                      },
+                    ),
+                  ),
+                const Divider(),
+                const SizedBox(height: 16),
+                const Text('Create new route:'),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: createRouteNameController,
+                  decoration: const InputDecoration(labelText: 'Route name'),
+                ),
+                TextField(
+                  controller: createRouteDescController,
+                  decoration: const InputDecoration(labelText: 'Description (optional)'),
                 ),
               ],
             ),
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Close')),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Close'),
+            ),
             ElevatedButton(
-              onPressed: () async {
-                if (manageWorking) return;
-                final routeIdRaw = routes.isNotEmpty ? (selectedRouteId ?? routeController.text.trim()) : routeController.text.trim();
-                final departure = departureController.text.trim();
-                final arrival = arrivalController.text.trim();
-                if ((routeIdRaw == null || routeIdRaw.toString().isEmpty) || departure.isEmpty || arrival.isEmpty) {
-                  Future.delayed(const Duration(milliseconds: 200), () {
-                    if (!mounted) return;
-                    _showDeferredSnackBar('Fill route, departure and arrival');
-                  });
+              onPressed: manageWorking ? null : () async {
+                final name = createRouteNameController.text.trim();
+                if (name.isEmpty) {
+                  _showDeferredSnackBar('Enter route name');
                   return;
                 }
+
                 setStateDialog(() => manageWorking = true);
                 try {
-                  debugPrint('[ManageShuttles] Creating schedule route=$routeIdRaw departure=$departure arrival=$arrival day=$selectedDay');
-                  final created = await _service.createSchedule(
-                    routeId: int.tryParse(routeIdRaw.toString()) ?? routeIdRaw,
-                    departureTime: departure,
-                    arrivalTime: arrival,
-                    dayOfWeek: selectedDay,
+                  await _service.createRoute(
+                    name: name,
+                    description: createRouteDescController.text.trim(),
                   );
-                  debugPrint('[ManageShuttles] Created schedule: $created');
                   await _loadData();
-                  Navigator.of(context).pop('schedule_created');
-                 } catch (e) {
-                  debugPrint('[ManageShuttles] Failed to create schedule: $e');
-                  // close dialog with an error marker; outer caller will show snackbar
-                  Navigator.of(context).pop('schedule_error:$e');
-                 } finally {
-                   try {
-                     setStateDialog(() => manageWorking = false);
-                   } catch (_) {}
-                 }
-               },
-              child: manageWorking ? const SizedBox(width:16,height:16,child:CircularProgressIndicator(strokeWidth:2,valueColor:AlwaysStoppedAnimation<Color>(Colors.white))) : const Text('Create'),
+                  _showDeferredSnackBar('Route created successfully');
+                  Navigator.of(context).pop();
+                } catch (e) {
+                  _showDeferredSnackBar('Failed to create route: $e');
+                } finally {
+                  setStateDialog(() => manageWorking = false);
+                }
+              },
+              child: manageWorking
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                      ),
+                    )
+                  : const Text('Create Route'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showManageSchedulesDialog() {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('Manage Schedules'),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: ListView.builder(
+              itemCount: schedules.length,
+              itemBuilder: (context, index) {
+                final schedule = schedules[index];
+                return ListTile(
+                  title: Text('Schedule ID: ${schedule['schedule_id']}'),
+                  subtitle: Text('Details: ${schedule['details'] ?? 'No details'}'),
+                  trailing: IconButton(
+                    icon: const Icon(Icons.delete, color: Colors.red),
+                    onPressed: () => _deleteSchedule(schedule['schedule_id']),
+                  ),
+                );
+              },
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Close'),
             ),
           ],
         );
-      }),
+      },
+    );
+  }
+
+  Future<void> _deleteSchedule(dynamic scheduleId) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete Schedule'),
+        content: Text('Are you sure you want to delete this schedule?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
     );
 
-    // After dialog completes, show snackbars from outer context
-    if (!mounted) return;
-    if (result == 'schedule_created') {
-      _showDeferredSnackBar('Schedule created');
-    } else if (result != null && result.startsWith('schedule_error:')) {
-      final msg = result.substring('schedule_error:'.length);
-      _showDeferredSnackBar('Failed to create schedule: $msg');
+    if (confirm != true) return;
+
+    try {
+      await _service.deleteSchedule(scheduleId);
+      setState(() {
+        schedules.removeWhere((s) => s['schedule_id'] == scheduleId);
+      });
+      _showDeferredSnackBar('Schedule deleted');
+    } catch (e) {
+      _showDeferredSnackBar('Failed to delete schedule: $e');
     }
-   }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Manage Shuttles'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: _loadData,
+          ),
+        ],
+      ),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : LayoutBuilder(
+              builder: (context, constraints) {
+                return Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _buildActionButtons(constraints),
+                      const SizedBox(height: 16),
+                      _buildFilterSection(constraints),
+                      const SizedBox(height: 16),
+                      Expanded(
+                        child: _buildShuttlesList(constraints),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+    );
+  }
 }

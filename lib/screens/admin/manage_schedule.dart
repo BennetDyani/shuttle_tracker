@@ -171,15 +171,15 @@ class _ManageScheduleScreenState extends State<ManageScheduleScreen> {
         if (r is Map) {
           final id = (r['id'] ?? r['routeId'] ?? r['route_id'])?.toString() ?? '';
           final name = (r['name'] ?? r['routeName'] ?? id)?.toString() ?? id;
-          return {'id': id, 'name': name};
+          return <String, dynamic>{'id': id, 'name': name};
         } else {
           try {
             final id = r.id?.toString() ?? r.toString();
             final name = (r.name?.toString() ?? id);
-            return {'id': id, 'name': name};
+            return <String, dynamic>{'id': id, 'name': name};
           } catch (_) {
             final val = r.toString();
-            return {'id': val, 'name': val};
+            return <String, dynamic>{'id': val, 'name': val};
           }
         }
       }).where((m) => (m['id']?.isNotEmpty ?? false)).toList();
@@ -275,7 +275,11 @@ class _ManageScheduleScreenState extends State<ManageScheduleScreen> {
 
                   final dialogContext = context;
                   try {
-                    final routeName = routes.firstWhere((r) => (r['id'] ?? '') == (selectedRouteId ?? ''), orElse: () => {})['name'] ?? selectedRouteId ?? '';
+                    final matchedRoute = routes.firstWhere(
+                      (r) => (r['id'] ?? '') == (selectedRouteId ?? ''),
+                      orElse: () => <String, dynamic>{'id': selectedRouteId ?? '', 'name': selectedRouteId ?? ''}
+                    );
+                    final routeName = matchedRoute['name'] ?? selectedRouteId ?? '';
                     final temp = {'route': routeName, 'departureTime': depStr, 'arrivalTime': arrStr, 'status': 'Pending', 'day': dayOfWeek};
                     setState(() => schedules.insert(0, temp));
 
@@ -361,7 +365,7 @@ class _ManageScheduleScreenState extends State<ManageScheduleScreen> {
       debugPrint('[ManageSchedule] raw drivers count=${drivers.length}');
       if (drivers.isNotEmpty) debugPrint('[ManageSchedule] raw drivers sample=${drivers.first}');
 
-      final List<Map<String, String>> driverItems = (drivers as List<dynamic>).map<Map<String, String>>((d) {
+      final List<Map<String, dynamic>> driverItems = (drivers as List<dynamic>).map<Map<String, dynamic>>((d) {
         final Map<String, dynamic> dm = d as Map<String, dynamic>;
         String id = (dm['driverId'] ?? dm['driver_id'] ?? dm['id'])?.toString() ?? '';
 
@@ -389,7 +393,7 @@ class _ManageScheduleScreenState extends State<ManageScheduleScreen> {
         }
         if (label.isEmpty) label = id;
 
-        return {'id': id, 'label': label};
+        return <String, dynamic>{'id': id, 'label': label};
       }).where((m) => (m['id']?.isNotEmpty ?? false)).toList();
 
       if (driverItems.isEmpty) {
@@ -430,7 +434,7 @@ class _ManageScheduleScreenState extends State<ManageScheduleScreen> {
         return;
       }
 
-      final List<Map<String, String>> shuttleItems = (rawShuttles as List<dynamic>).map<Map<String, String>>((s) {
+      final List<Map<String, dynamic>> shuttleItems = (rawShuttles as List<dynamic>).map<Map<String, dynamic>>((s) {
         String id = '';
         String label = '';
         if (s is Map) {
@@ -447,7 +451,7 @@ class _ManageScheduleScreenState extends State<ManageScheduleScreen> {
             label = val;
           }
         }
-        return {'id': id, 'label': label};
+        return <String, dynamic>{'id': id, 'label': label};
       }).where((m) => (m['id']?.isNotEmpty ?? false)).toList();
 
       debugPrint('[ManageSchedule] driverItems count=${driverItems.length}');

@@ -1,18 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../providers/auth_provider.dart';
+import '../../services/APIService.dart';
+import '../../services/endpoints.dart';
+import '../../services/logout_helper.dart';
+import '../../models/driver_model/Driver.dart';
+import '../../models/driver_model/Shuttle.dart';
+import '../../services/shuttle_service.dart';
 import 'live_route_tracking.dart';
 import 'schedule_screen.dart';
 import 'stop_screen.dart';
 import 'report_maintenance.dart';
-import 'settings_page.dart';
-import 'profile_page.dart';
-import '../../services/APIService.dart';
-import '../../models/driver_model/Driver.dart';
-import '../../services/logout_helper.dart';
-import '../../services/endpoints.dart';
-import '../../services/shuttle_service.dart';
-import '../../models/shuttle_model.dart';
 
 class DriverDashboard extends StatefulWidget {
   const DriverDashboard({super.key});
@@ -172,9 +170,9 @@ class _DriverDashboardState extends State<DriverDashboard> {
       if (shuttleIdRaw.isNotEmpty) {
         try {
           // ShuttleService.getShuttles() returns List<Shuttle>; handle Shuttle objects directly
-          final List<Shuttle> shuttles = await _shuttleService.getShuttles();
+          final List<Shuttle> shuttles = (await _shuttleService.getShuttles()).cast<Shuttle>();
           for (final s in shuttles) {
-            final sid = s.id?.toString() ?? '';
+            final sid = s.shuttleId.toString();
             if (sid.isNotEmpty && sid == shuttleIdRaw) {
               shuttleLabel = s.licensePlate;
               shuttleCap = s.capacity.toString();
@@ -236,302 +234,312 @@ class _DriverDashboardState extends State<DriverDashboard> {
 
   @override
   Widget build(BuildContext context) {
-    final dUser = driver?.user;
     return Scaffold(
       appBar: AppBar(
-        title: Text(_isLoadingName ? 'Driver Dashboard' : 'Hi, ${_displayName}'),
+        title: Text(_isLoadingName ? 'Driver Dashboard' : 'Hi, $_displayName'),
         actions: [
           IconButton(
             icon: const Icon(Icons.logout),
-            tooltip: 'Logout',
-            onPressed: () async {
-              // Confirm logout with the user
-              final confirm = await showDialog<bool>(
-                context: context,
-                builder: (ctx) => AlertDialog(
-                  title: const Text('Logout'),
-                  content: const Text('Are you sure you want to logout?'),
-                  actions: [
-                    TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancel')),
-                    TextButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Logout')),
-                  ],
-                ),
-              );
-              if (confirm == true) {
-                await performGlobalLogout();
-              }
-            },
-          ),
-          IconButton(
-            icon: const Icon(Icons.settings),
-            onPressed: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const DriverSettingsPage()),
-              );
-            },
+            onPressed: () => performGlobalLogout(),
           ),
         ],
       ),
-      body: isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : errorMessage != null
-              ? Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      // When driver row missing, show user info and CTA to create profile
-                      if (driverNotFound) ...[
-                        Card(
-                          margin: const EdgeInsets.symmetric(horizontal: 12),
-                          child: Padding(
-                            padding: const EdgeInsets.all(16.0),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Text('No Driver Profile Found', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                                const SizedBox(height: 8),
-                                Text(errorMessage!, textAlign: TextAlign.left),
-                                const SizedBox(height: 12),
-                                Text('Account info:', style: TextStyle(fontWeight: FontWeight.bold)),
-                                const SizedBox(height: 6),
-                                Text('Name: ${userRow == null ? '-' : '${userRow!['first_name'] ?? ''} ${userRow!['last_name'] ?? ''}'.trim()}'),
-                                const SizedBox(height: 4),
-                                Text('Email: ${userRow?['email'] ?? '-'}'),
-                                const SizedBox(height: 4),
-                                Text('Staff ID: ${userRow?['staff_id'] ?? '-'}'),
-                                const SizedBox(height: 12),
-                                Row(
-                                  children: [
-                                    ElevatedButton.icon(
-                                      onPressed: () {
-                                        Navigator.of(context).push(
-                                          MaterialPageRoute(builder: (_) => const DriverProfilePage()),
-                                        );
-                                      },
-                                      icon: const Icon(Icons.edit),
-                                      label: const Text('Create / Edit Driver Profile'),
-                                    ),
-                                    const SizedBox(width: 12),
-                                    ElevatedButton.icon(
-                                      onPressed: _quickCreateDriver,
-                                      icon: const Icon(Icons.add),
-                                      label: const Text('Quick Create'),
-                                      style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
-                                    ),
-                                    const SizedBox(width: 12),
-                                    OutlinedButton.icon(
-                                      onPressed: _fetchDriver,
-                                      icon: const Icon(Icons.refresh),
-                                      label: const Text('Retry'),
-                                    ),
-                                  ],
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          final padding = constraints.maxWidth < 600 ? 16.0 : 24.0;
+          return SingleChildScrollView(
+            padding: EdgeInsets.all(padding),
+            child: Center(
+              child: ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: 1200),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    if (isLoading)
+                      const Center(child: CircularProgressIndicator())
+                    else if (errorMessage != null)
+                      Center(
+                        child: Padding(
+                          padding: const EdgeInsets.all(16.0),
+                          child: Column(
+                            children: [
+                              Text(
+                                errorMessage!,
+                                style: const TextStyle(color: Colors.red),
+                                textAlign: TextAlign.center,
+                              ),
+                              if (driverNotFound && userRow != null) ...[
+                                const SizedBox(height: 16),
+                                ElevatedButton(
+                                  onPressed: _quickCreateDriver,
+                                  child: const Text('Create Driver Profile'),
                                 ),
                               ],
-                            ),
-                          ),
-                        ),
-                      ] else ...[
-                        Text(errorMessage!),
-                        const SizedBox(height: 12),
-                        ElevatedButton.icon(
-                          onPressed: _fetchDriver,
-                          icon: const Icon(Icons.refresh),
-                          label: const Text('Retry'),
-                        ),
-                      ],
-                    ],
-                  ),
-                )
-              : SingleChildScrollView(
-                  padding: const EdgeInsets.all(16.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      // Active Assignment Card
-                      Card(
-                        elevation: 2,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                        child: Padding(
-                          padding: const EdgeInsets.all(20.0),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              // Add refresh button and optional spinner for assignment loading
-                              Row(
-                                children: [
-                                  const Expanded(child: Text('Active Assignment', style: TextStyle(fontSize: 16, color: Colors.grey))),
-                                  if (assignmentLoading) const SizedBox(width: 12),
-                                  if (assignmentLoading) const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)),
-                                  IconButton(
-                                    tooltip: 'Refresh assignment',
-                                    icon: const Icon(Icons.refresh, size: 20),
-                                    onPressed: driver == null ? null : () async {
-                                      if (driver == null) return;
-                                      // ensure spinner shows immediately
-                                      if (mounted) setState(() => assignmentLoading = true);
-                                      try {
-                                        await _loadAssignmentForDriver(driver!.driverId);
-                                      } finally {
-                                        if (mounted) setState(() => assignmentLoading = false);
-                                      }
-                                    },
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 8),
-                              Text('Driver: ${dUser?.name ?? "-"} ${dUser?.surname ?? ""}', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-                              const SizedBox(height: 6),
-                              Text('Email: ${dUser?.email ?? "-"}', style: const TextStyle(fontSize: 16)),
-                              const SizedBox(height: 8),
-                              // Show assigned shuttle summary on the Active Assignment card
-                              Text('Assigned Shuttle: ${assignedShuttleLabel}', style: const TextStyle(fontSize: 16)),
-                              const SizedBox(height: 4),
-                              Text('Shuttle Capacity: ${assignedShuttleCapacity}', style: const TextStyle(fontSize: 16)),
-                              const SizedBox(height: 10),
-                              Row(
-                                children: [
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                                    decoration: BoxDecoration(
-                                      color: inService ? Colors.green : Colors.orange,
-                                      borderRadius: BorderRadius.circular(8),
-                                    ),
-                                    child: Row(
-                                      children: [
-                                        Icon(
-                                          inService ? Icons.circle : Icons.circle_outlined,
-                                          color: Colors.white,
-                                          size: 14,
-                                        ),
-                                        const SizedBox(width: 6),
-                                        Text(
-                                          inService ? 'In Service' : 'Not Started',
-                                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                  const Spacer(),
-                                  ElevatedButton(
-                                    onPressed: () {
-                                      setState(() {
-                                        inService = !inService;
-                                      });
-                                    },
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: inService ? Colors.red : Colors.green,
-                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                                    ),
-                                    child: Text(inService ? 'End Shift' : 'Start Shift'),
-                                  ),
-                                ],
-                              ),
                             ],
                           ),
                         ),
-                      ),
-                      const SizedBox(height: 20),
-                      // Shuttle Info Card
-                      Card(
-                        elevation: 2,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                        child: Padding(
-                          padding: const EdgeInsets.all(20.0),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text('Shuttle Info', style: TextStyle(fontSize: 16, color: Colors.grey)),
-                              const SizedBox(height: 8),
-                              Row(
-                                children: [
-                                  const Icon(Icons.badge, color: Colors.blue, size: 28),
-                                  const SizedBox(width: 10),
-                                  Text('Driver License: ${driver?.driverLicense ?? "-"}', style: const TextStyle(fontSize: 16)),
-                                ],
-                              ),
-                              const SizedBox(height: 6),
-                              // Shuttle details come from assignments/shuttle service
-                              Text('Assigned Shuttle: ${assignedShuttleLabel}', style: const TextStyle(fontSize: 16)),
-                              const SizedBox(height: 6),
-                              Text('Capacity: ${assignedShuttleCapacity}', style: const TextStyle(fontSize: 16)),
-                              const SizedBox(height: 6),
-                              Row(
-                                children: [
-                                  Icon(
-                                    shuttleStatus == 'Available' ? Icons.check_circle : Icons.warning,
-                                    color: shuttleStatus == 'Available' ? Colors.green : Colors.red,
-                                    size: 20,
-                                  ),
-                                  const SizedBox(width: 6),
-                                  Text(
-                                    shuttleStatus,
-                                    style: TextStyle(
-                                      color: shuttleStatus == 'Available' ? Colors.green : Colors.red,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 20),
-                      // Quick Actions Grid
-                      GridView.count(
-                        crossAxisCount: 2,
-                        shrinkWrap: true,
-                        physics: const NeverScrollableScrollPhysics(),
-                        mainAxisSpacing: 16,
-                        crossAxisSpacing: 16,
-                        childAspectRatio: 1.2,
-                        children: [
-                          _quickAction(context, Icons.map, 'View Route Map', () {
-                            Navigator.of(context).push(
-                              MaterialPageRoute(builder: (_) => const LiveRouteTrackingScreen()),
-                            );
-                          }),
-                          _quickAction(context, Icons.schedule, 'View Schedule', () {
-                            Navigator.of(context).push(
-                              MaterialPageRoute(builder: (_) => const DriverScheduleScreen()),
-                            );
-                          }),
-                          _quickAction(context, Icons.directions_walk, 'View Stops', () {
-                            Navigator.of(context).push(
-                              MaterialPageRoute(builder: (_) => const DriverStopsScreen()),
-                            );
-                          }),
-                          _quickAction(context, Icons.report_problem, 'Report Issue', () {
-                            Navigator.of(context).push(
-                              MaterialPageRoute(builder: (_) => const ReportMaintenanceScreen()),
-                            );
-                          }),
-                        ],
-                      ),
+                      )
+                    else ...[
+                      _buildStatusSection(constraints),
+                      SizedBox(height: constraints.maxWidth < 600 ? 16 : 24),
+                      _buildActionButtons(constraints),
+                      SizedBox(height: constraints.maxWidth < 600 ? 16 : 24),
+                      _buildCurrentAssignment(constraints),
                     ],
-                  ),
+                  ],
                 ),
+              ),
+            ),
+          );
+        },
+      ),
     );
   }
 
-  Widget _quickAction(BuildContext context, IconData icon, String label, VoidCallback onTap) {
-    return ElevatedButton(
-      onPressed: onTap,
-      style: ElevatedButton.styleFrom(
-        backgroundColor: Colors.blue[50],
-        foregroundColor: Colors.blue[900],
-        padding: const EdgeInsets.all(12),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        elevation: 0,
-      ),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(icon, size: 36),
-          const SizedBox(height: 10),
-          Text(label, textAlign: TextAlign.center, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
-        ],
+  Widget _buildStatusSection(BoxConstraints constraints) {
+    final isSmallScreen = constraints.maxWidth < 600;
+    return Card(
+      elevation: 2,
+      child: Padding(
+        padding: EdgeInsets.all(isSmallScreen ? 16.0 : 24.0),
+        child: constraints.maxWidth < 600
+            ? Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _buildDriverInfo(),
+                  const Divider(height: 32),
+                  _buildShuttleInfo(),
+                ],
+              )
+            : IntrinsicHeight(
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(child: _buildDriverInfo()),
+                    const VerticalDivider(width: 48, thickness: 1),
+                    Expanded(child: _buildShuttleInfo()),
+                  ],
+                ),
+              ),
       ),
     );
+  }
+
+  Widget _buildDriverInfo() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Driver Information',
+          style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 16),
+        _buildInfoRow('License', driver?.licenseNumber ?? 'Not available'),
+        const SizedBox(height: 8),
+        _buildInfoRow('Status', driver?.status ?? 'Active'),
+        const SizedBox(height: 8),
+        _buildInfoRow('Phone', driver?.phoneNumber ?? userRow?['phone_number'] ?? 'Not provided'),
+      ],
+    );
+  }
+
+  Widget _buildShuttleInfo() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Assigned Shuttle',
+          style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 16),
+        _buildInfoRow('Shuttle', assignedShuttleLabel),
+        const SizedBox(height: 8),
+        _buildInfoRow('Capacity', '$assignedShuttleCapacity seats'),
+        const SizedBox(height: 8),
+        _buildInfoRow('Status', shuttleStatus),
+      ],
+    );
+  }
+
+  Widget _buildInfoRow(String label, String value) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 80,
+          child: Text(
+            label,
+            style: const TextStyle(
+              fontWeight: FontWeight.w500,
+              color: Colors.grey,
+            ),
+          ),
+        ),
+        Expanded(
+          child: Text(
+            value,
+            style: const TextStyle(
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildActionButtons(BoxConstraints constraints) {
+    final isSmallScreen = constraints.maxWidth < 600;
+    final buttonWidth = (constraints.maxWidth - (isSmallScreen ? 32 : 48)) / (isSmallScreen ? 2 : 4);
+    final buttonSpacing = isSmallScreen ? 12.0 : 16.0;
+
+    return Wrap(
+      spacing: buttonSpacing,
+      runSpacing: buttonSpacing,
+      alignment: WrapAlignment.center,
+      children: [
+        _actionButton(
+          'Start Route',
+          Icons.play_arrow,
+          Colors.green,
+          buttonWidth,
+          () => Navigator.push(context, MaterialPageRoute(builder: (_) => const LiveRouteTrackingScreen())),
+        ),
+        _actionButton(
+          'View Schedule',
+          Icons.schedule,
+          Colors.blue,
+          buttonWidth,
+          () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ScheduleScreen())),
+        ),
+        _actionButton(
+          'Stop Points',
+          Icons.location_on,
+          Colors.orange,
+          buttonWidth,
+          () => Navigator.push(context, MaterialPageRoute(builder: (_) => const StopScreen())),
+        ),
+        _actionButton(
+          'Report Issue',
+          Icons.report_problem,
+          Colors.red,
+          buttonWidth,
+          () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ReportMaintenanceScreen())),
+        ),
+      ],
+    );
+  }
+
+  Widget _actionButton(String label, IconData icon, Color color, double width, VoidCallback onTap) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          width: width,
+          padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
+          decoration: BoxDecoration(
+            color: color.withAlpha(25),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: color.withAlpha(77)),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, color: color, size: 32),
+              const SizedBox(height: 12),
+              Text(
+                label,
+                style: TextStyle(
+                  color: color,
+                  fontSize: 14,
+                  fontWeight: FontWeight.bold,
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCurrentAssignment(BoxConstraints constraints) {
+    final isSmallScreen = constraints.maxWidth < 600;
+    return Card(
+      elevation: 2,
+      child: Padding(
+        padding: EdgeInsets.all(isSmallScreen ? 16.0 : 24.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Current Assignment',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+            ),
+            SizedBox(height: isSmallScreen ? 16 : 24),
+            constraints.maxWidth < 600
+                ? Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: _buildAssignmentDetails(),
+                  )
+                : IntrinsicHeight(
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: _buildAssignmentDetails()
+                          .map((widget) => Expanded(child: widget))
+                          .toList(),
+                    ),
+                  ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  List<Widget> _buildAssignmentDetails() {
+    return [
+      Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Route Information',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 12),
+          _buildInfoRow('Route', activeAssignment?['route_name'] ?? 'Not assigned'),
+          const SizedBox(height: 8),
+          _buildInfoRow(
+            'Schedule',
+            activeAssignment?['schedule_id'] != null
+                ? 'Schedule ${activeAssignment!['schedule_id']}'
+                : 'Not assigned',
+          ),
+        ],
+      ),
+      Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Status',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 12),
+          _buildInfoRow('Service', inService ? 'In Service' : 'Not in Service'),
+          if (activeAssignment != null) ...[
+            const SizedBox(height: 8),
+            _buildInfoRow('Start Time', activeAssignment!['start_time'] ?? 'Not set'),
+            const SizedBox(height: 8),
+            _buildInfoRow('End Time', activeAssignment!['end_time'] ?? 'Not set'),
+          ],
+        ],
+      ),
+    ];
   }
 }

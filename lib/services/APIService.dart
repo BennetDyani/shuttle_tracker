@@ -1,15 +1,12 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
-import 'package:http/http.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:provider/provider.dart';
 import '../models/User.dart' as AppUser;
 import '../models/driver_model/Location.dart';
 import '../models/driver_model/LocationMessage.dart';
 import 'endpoints.dart';
 import 'globals.dart' as globals;
 import 'logger.dart';
-import '../providers/auth_provider.dart';
 import 'logout_helper.dart';
 import 'shuttle_service.dart';
 
@@ -386,6 +383,26 @@ class APIService {
     return users;
   }
 
+  // Fetch users as raw maps (useful for dashboards/statistics)
+  Future<List<Map<String, dynamic>>> fetchUsersRaw() async {
+    final result = await get(Endpoints.userGetAll);
+    List<dynamic>? rawList;
+    if (result is List) {
+      rawList = result;
+    } else if (result is Map<String, dynamic>) {
+      if (result['data'] is List) rawList = result['data'] as List<dynamic>;
+      else if (result['users'] is List) rawList = result['users'] as List<dynamic>;
+    }
+
+    if (rawList == null) throw Exception('Failed to fetch users: $result');
+
+    return rawList.map((item) {
+      if (item is Map<String, dynamic>) return item;
+      if (item is Map) return Map<String, dynamic>.from(item);
+      return <String, dynamic>{};
+    }).toList();
+  }
+
   // Auth: login with email and password
   Future<dynamic> login({required String email, required String password}) async {
     final payload = {'email': email, 'password': password};
@@ -396,8 +413,47 @@ class APIService {
   // New: Staff login with staffId and password
   Future<dynamic> staffLogin({required String staffId, required String password}) async {
     final payload = {'staffId': staffId, 'password': password};
-    final endpoint = globals.overrideAuthStaffLoginPath.trim().isNotEmpty ? globals.overrideAuthStaffLoginPath.trim() : Endpoints.authStaffLogin;
-    return await post(endpoint, payload);
+    final endpoint = globals.overrideAuthStaffLoginPath.trim().isNotEmpty
+        ? globals.overrideAuthStaffLoginPath.trim()
+        : Endpoints.authStaffLogin;
+
+    // Try the primary endpoint first
+    try {
+      AppLogger.info('Attempting staff login', data: {'staffId': staffId});
+      return await post(endpoint, payload);
+    } on ApiException catch (e) {
+      // If we get a 404, try alternative endpoint variations
+      if (e.statusCode == 404) {
+        AppLogger.debug('Staff login endpoint not found, trying alternatives');
+
+        final alternativeEndpoints = [
+          'auth/staff-login',  // Try with hyphen
+          'auth/staffLogin',   // Try camelCase
+          'auth/login',        // Try regular login as fallback
+        ];
+
+        for (final altEndpoint in alternativeEndpoints) {
+          if (altEndpoint == endpoint) continue; // Skip if same as primary
+
+          try {
+            AppLogger.debug('Trying alternative staff login endpoint: $altEndpoint');
+            return await post(altEndpoint, payload);
+          } on ApiException catch (altError) {
+            if (altError.statusCode != 404) {
+              // If we get a non-404 error, it means the endpoint exists but failed for other reason
+              rethrow;
+            }
+            // Continue trying other endpoints on 404
+            continue;
+          }
+        }
+
+        // If all alternatives failed, throw the original error
+        AppLogger.error('All staff login endpoints failed', error: e);
+        rethrow;
+      }
+      rethrow;
+    }
   }
 
   // Registration: register a new user; payload should match backend contract
@@ -520,6 +576,27 @@ class APIService {
     return await post(Endpoints.complaintCreate, payload);
   }
 
+  // Fetch all complaints
+  Future<List<Map<String, dynamic>>> fetchComplaints({int? userId, String? status}) async {
+    final params = <String, String>{};
+    if (userId != null) params['userId'] = userId.toString();
+    if (status != null) params['status'] = status;
+    final query = params.isNotEmpty ? '?${Uri(queryParameters: params).query}' : '';
+    final result = await get('${Endpoints.complaintGetAll}$query');
+
+    List<dynamic>? rawList;
+    if (result is List) {
+      rawList = result;
+    } else if (result is Map<String, dynamic>) {
+      if (result['data'] is List) rawList = result['data'] as List<dynamic>;
+      else if (result['complaints'] is List) rawList = result['complaints'] as List<dynamic>;
+      else if (result['complaint'] is List) rawList = result['complaint'] as List<dynamic>;
+    }
+
+    if (rawList == null) return [];
+    return rawList.map((e) => e is Map<String, dynamic> ? e : Map<String, dynamic>.from(e)).toList();
+  }
+
   // --- Location-specific methods ---
   Future<List<Location>> fetchRecentLocations({int? limit, int? shuttleId, int? driverId}) async {
     final endpoint = Endpoints.locationRecent(limit: limit, shuttleId: shuttleId, driverId: driverId);
@@ -579,10 +656,47 @@ class APIService {
   }
 
   Future<Map<String, dynamic>> fetchUserById(int userId) async {
-    final result = await get(Endpoints.userReadById(userId));
-    if (result is Map<String, dynamic>) return result;
-    if (result is Map) return Map<String, dynamic>.from(result);
-    throw Exception('Failed to fetch user: $result');
+    try {
+      final result = await get(Endpoints.userReadById(userId));
+      if (result is Map<String, dynamic>) return result;
+      if (result is Map) return Map<String, dynamic>.from(result);
+      throw Exception('Failed to fetch user: $result');
+    } on ApiException catch (e) {
+      // If we get a 404, try fetching all users and finding the match
+      if (e.statusCode == 404) {
+        AppLogger.debug('User $userId not found via direct endpoint, trying users list');
+        try {
+          final usersResponse = await get('users/getAll');
+          List<dynamic> usersList = [];
+
+          // Extract users list from response
+          if (usersResponse is List) {
+            usersList = usersResponse;
+          } else if (usersResponse is Map) {
+            usersList = (usersResponse['users'] ??
+                        usersResponse['data'] ??
+                        usersResponse['items'] ??
+                        []) as List<dynamic>;
+          }
+
+          // Find user by ID
+          for (final u in usersList) {
+            if (u is Map) {
+              final uid = u['user_id'] ?? u['userId'] ?? u['id'];
+              if (uid?.toString() == userId.toString()) {
+                return u is Map<String, dynamic> ? u : Map<String, dynamic>.from(u);
+              }
+            }
+          }
+
+          throw Exception('User $userId not found in users list');
+        } catch (fallbackError) {
+          AppLogger.warn('Fallback to users list failed: $fallbackError');
+          rethrow;
+        }
+      }
+      rethrow;
+    }
   }
 
   Future<Map<String, dynamic>> fetchDriverByEmail(String email) async {

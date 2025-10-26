@@ -2,7 +2,6 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:shuttle_tracker/services/APIService.dart';
-import 'package:shuttle_tracker/services/endpoints.dart';
 import 'package:shuttle_tracker/services/logger.dart';
 import 'package:shuttle_tracker/models/Shuttle.dart' as ShuttleModel;
 import 'package:shuttle_tracker/models/driver_model/Driver.dart';
@@ -50,8 +49,8 @@ class _ManageFleetScreenState extends State<ManageFleetScreen> {
       final api = APIService();
       // Fetch shuttles and drivers in parallel
       final futures = await Future.wait([api.fetchShuttles(), api.fetchDrivers().catchError((_) => <dynamic>[]) ]);
-      final res = futures[0] as List<dynamic>;
-      final driversRes = futures[1] as List<dynamic>;
+      final res = futures[0];
+      final driversRes = futures[1];
       // fetchShuttles guarantees a List or throws
       try {
         _lastRawJson = const JsonEncoder.withIndent('  ').convert(res);
@@ -274,7 +273,7 @@ class _AddEditShuttleDialogState extends State<AddEditShuttleDialog> {
         // Parse authoritative shuttle returned by server
         Map<String, dynamic>? obj;
         if (result is Map<String, dynamic>) {
-          obj = (result['shuttle'] is Map<String, dynamic>) ? (result['shuttle'] as Map<String, dynamic>) : result as Map<String, dynamic>;
+          obj = (result['shuttle'] is Map<String, dynamic>) ? result['shuttle'] : result;
         }
         if (obj != null) {
           final created = ShuttleModel.ShuttleModel.fromJson(obj);
@@ -319,13 +318,13 @@ class _AddEditShuttleDialogState extends State<AddEditShuttleDialog> {
         } else {
           // last resort: attempt to PUT to /shuttles/update if backend expects that
           try {
-            updateResult = await api.put(Endpoints.shuttleUpdate, payload);
+            updateResult = await api.put('shuttles/update', payload);
           } catch (_) {}
         }
         // Try to parse authoritative updated shuttle
         Map<String, dynamic>? updatedObj;
         if (updateResult is Map<String, dynamic>) {
-          updatedObj = (updateResult['shuttle'] is Map<String, dynamic>) ? (updateResult['shuttle'] as Map<String, dynamic>) : updateResult as Map<String, dynamic>;
+          updatedObj = (updateResult['shuttle'] is Map<String, dynamic>) ? updateResult['shuttle'] : updateResult;
         }
         if (updatedObj == null && resolvedId != null && resolvedId > 0) {
           try {
@@ -385,7 +384,7 @@ class _AddEditShuttleDialogState extends State<AddEditShuttleDialog> {
             ),
             // Assigned Driver dropdown (populated from drivers endpoint when available)
             DropdownButtonFormField<int?>(
-              value: selectedDriverId,
+              initialValue: selectedDriverId,
               decoration: InputDecoration(labelText: 'Assigned Driver (optional)', errorText: fieldErrors['driverId']),
               items: [
                 const DropdownMenuItem<int?>(value: null, child: Text('--- No driver ---')),
