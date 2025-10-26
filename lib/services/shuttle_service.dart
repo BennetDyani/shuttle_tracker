@@ -399,6 +399,14 @@ class ShuttleService {
     }
   }
 
+  // Delete a schedule
+  Future<void> deleteSchedule(dynamic scheduleId) async {
+    final response = await http.delete(Uri.parse('$baseUrl/schedules/$scheduleId'));
+    if (response.statusCode != 200) {
+      throw Exception('Failed to delete schedule: ${response.statusCode}');
+    }
+  }
+
   // Debug helper: return raw response status and body for a given relative path
   Future<Map<String, dynamic>> debugGetRaw(String relativePath) async {
     final url = '$baseUrl/$relativePath';

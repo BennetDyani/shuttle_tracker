@@ -1,5 +1,5 @@
-import 'driver.dart';
-import 'shuttle.dart';
+import 'Driver.dart';
+import 'Shuttle.dart';
 import 'location_status.dart';
 
 class Location {

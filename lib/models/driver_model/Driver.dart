@@ -36,27 +36,39 @@ User _parseUser(dynamic u) {
 }
 
 class Driver {
-  final int driverId; // Java Long -> Dart int
+  final int driverId;
   User user;
   String driverLicense;
+  String status;
+  String phoneNumber;
+  String? licenseNumber;
 
   Driver({
     required this.driverId,
     required this.user,
     required this.driverLicense,
+    this.status = 'Active',
+    this.phoneNumber = '',
+    this.licenseNumber,
   });
 
   // JSON serialization/deserialization
   factory Driver.fromJson(Map<String, dynamic> json) {
     // Accept multiple common id keys from different backends
-    final id = _parseId(json['driver_id'] ?? json['driverId'] ?? json['id']);
-    final userVal = json['user'] ?? json['user_id'] ?? json['userId'];
-    final parsedUser = _parseUser(userVal is Map || userVal is Map<String, dynamic> ? userVal : (json['user'] ?? json['user']));
-    final license = (json['driverLicense'] ?? json['driver_license'] ?? json['license_number'] ?? '').toString();
+    final id = _parseId(json['driverId'] ?? json['driver_id'] ?? json['id']);
+    final user = _parseUser(json['user']);
+    final license = (json['driverLicense'] ?? json['driver_license'] ?? '').toString();
+    final status = (json['status'] ?? 'Active').toString();
+    final phone = (json['phoneNumber'] ?? json['phone_number'] ?? '').toString();
+    final licenseNum = (json['licenseNumber'] ?? json['license_number'])?.toString();
+
     return Driver(
       driverId: id,
-      user: parsedUser,
+      user: user,
       driverLicense: license,
+      status: status,
+      phoneNumber: phone,
+      licenseNumber: licenseNum,
     );
   }
 
@@ -64,5 +76,8 @@ class Driver {
     'driverId': driverId,
     'user': user.toJson(),
     'driverLicense': driverLicense,
+    'status': status,
+    'phoneNumber': phoneNumber,
+    'licenseNumber': licenseNumber,
   };
 }

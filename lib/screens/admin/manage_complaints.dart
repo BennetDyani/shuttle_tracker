@@ -697,79 +697,251 @@ class _ManageComplaintsScreenState extends State<ManageComplaintsScreen> {
       appBar: AppBar(
         title: const Text('Complaints Center'),
         leading: Navigator.canPop(context) ? IconButton(icon: const Icon(Icons.arrow_back), onPressed: () => Navigator.pop(context)) : null,
+        actions: [
+          IconButton(icon: const Icon(Icons.refresh), onPressed: _fetchComplaints, tooltip: 'Refresh'),
+        ],
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text('Total complaints: ${_complaints.length}', style: const TextStyle(fontWeight: FontWeight.bold)),
-                Row(children: [
-                  IconButton(icon: const Icon(Icons.refresh), onPressed: _fetchComplaints),
-                ]),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Expanded(
-              child: _isLoading
-                  ? const Center(child: CircularProgressIndicator())
-                  : _error != null
-                  ? Center(child: Text('Error: $_error'))
-                  : _complaints.isEmpty
-                      ? const Center(child: Text('No complaints found'))
-                      : SingleChildScrollView(
-                          scrollDirection: Axis.horizontal,
-                          child: DataTable(
-                            columns: const [
-                              DataColumn(label: Text('Complaint ID')),
-                              DataColumn(label: Text('User')),
-                              DataColumn(label: Text('Subject')),
-                              DataColumn(label: Text('Status')),
-                              DataColumn(label: Text('Created At')),
-                              DataColumn(label: Text('Actions')),
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : _error != null
+              ? Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(Icons.error_outline, size: 64, color: Colors.red),
+                      const SizedBox(height: 16),
+                      Text('Error: $_error', style: const TextStyle(color: Colors.red)),
+                      const SizedBox(height: 16),
+                      ElevatedButton.icon(
+                        icon: const Icon(Icons.refresh),
+                        label: const Text('Retry'),
+                        onPressed: _fetchComplaints,
+                      ),
+                    ],
+                  ),
+                )
+              : _complaints.isEmpty
+                  ? const Center(child: Text('No complaints found'))
+                  : LayoutBuilder(
+                      builder: (context, constraints) {
+                        final isMobile = constraints.maxWidth < 600;
+                        return SingleChildScrollView(
+                          padding: EdgeInsets.all(isMobile ? 12.0 : 16.0),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Text(
+                                    'Total: ${_complaints.length} complaints',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: isMobile ? 16 : 18,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 16),
+                              if (isMobile)
+                                // Mobile: Card view
+                                ListView.builder(
+                                  shrinkWrap: true,
+                                  physics: const NeverScrollableScrollPhysics(),
+                                  itemCount: _complaints.length,
+                                  itemBuilder: (context, index) {
+                                    return _buildMobileComplaintCard(index);
+                                  },
+                                )
+                              else
+                                // Desktop: Table view
+                                SingleChildScrollView(
+                                  scrollDirection: Axis.horizontal,
+                                  child: _buildDesktopComplaintTable(),
+                                ),
                             ],
-                            rows: List<DataRow>.generate(_complaints.length, (index) {
-                              final c = _getComplaintByIndex(index);
-                              // Align cells with the header: ID, User, Subject, Status, Created At, Actions
-                              // Prefer email -> student number -> name -> userId
-                              final email = _getUserEmail(c);
-                              final studentNo = _getStudentNumber(c);
-                              final name = _getUserName(c);
-                              final uid = _getUserId(c);
-                              String userDisplay = (email.isNotEmpty)
-                                  ? email
-                                  : (studentNo.isNotEmpty)
-                                      ? studentNo
-                                      : (name.isNotEmpty)
-                                          ? name
-                                          : (uid.isNotEmpty ? uid : 'Unknown');
-                              if (userDisplay == 'Unknown') {
-                                final any = _getAnyUserIdentifier(c);
-                                if (any.isNotEmpty) userDisplay = any;
-                              }
-                              final subjectDisplay = _getSubject(c).isNotEmpty ? _getSubject(c) : 'No subject';
-                              return DataRow(cells: [
-                                DataCell(Text(_getComplaintId(c).toString())),
-                                DataCell(Text(userDisplay)),
-                                DataCell(Text(subjectDisplay)),
-                                DataCell(Text(_getStatus(c))),
-                                DataCell(Text(_getCreatedAt(c))),
-                                DataCell(Row(children: [
-                                  TextButton(onPressed: () => _showComplaintDetails(c), child: const Text('View')),
-                                  TextButton(onPressed: () => _updateComplaintStatus(c, 'IN_PROGRESS'), child: const Text('Mark In Progress')),
-                                  TextButton(onPressed: () => _updateComplaintStatus(c, 'RESOLVED'), child: const Text('Resolve')),
-                                ])),
-                              ]);
-                            }),
                           ),
-                        ),
-            ),
-          ],
+                        );
+                      },
+                    ),
+    );
+  }
+
+  Widget _buildMobileComplaintCard(int index) {
+    final c = _getComplaintByIndex(index);
+    final email = _getUserEmail(c);
+    final studentNo = _getStudentNumber(c);
+    final name = _getUserName(c);
+    final uid = _getUserId(c);
+    String userDisplay = (email.isNotEmpty)
+        ? email
+        : (studentNo.isNotEmpty)
+            ? studentNo
+            : (name.isNotEmpty)
+                ? name
+                : (uid.isNotEmpty ? uid : 'Unknown');
+    if (userDisplay == 'Unknown') {
+      final any = _getAnyUserIdentifier(c);
+      if (any.isNotEmpty) userDisplay = any;
+    }
+
+    final status = _getStatus(c);
+    final statusColor = status.toUpperCase() == 'RESOLVED' || status.toUpperCase() == 'CLOSED'
+        ? Colors.green
+        : status.toUpperCase() == 'IN_PROGRESS'
+            ? Colors.orange
+            : Colors.red;
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      elevation: 2,
+      child: InkWell(
+        onTap: () => _showComplaintDetails(c),
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.blue.shade100,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      '#${_getComplaintId(c)}',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.blue.shade800,
+                      ),
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: statusColor.withValues(alpha: 0.2),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      status,
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: statusColor.shade800,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                _getSubject(c),
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Row(
+                children: [
+                  const Icon(Icons.person, size: 14, color: Colors.grey),
+                  const SizedBox(width: 4),
+                  Expanded(
+                    child: Text(
+                      userDisplay,
+                      style: const TextStyle(fontSize: 13, color: Colors.grey),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              Row(
+                children: [
+                  const Icon(Icons.access_time, size: 14, color: Colors.grey),
+                  const SizedBox(width: 4),
+                  Text(
+                    _formatDate(_getCreatedAt(c)),
+                    style: const TextStyle(fontSize: 12, color: Colors.grey),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              const Divider(),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton.icon(
+                    icon: const Icon(Icons.visibility, size: 16),
+                    label: const Text('View Details'),
+                    onPressed: () => _showComplaintDetails(c),
+                  ),
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );
+  }
+
+  Widget _buildDesktopComplaintTable() {
+    return DataTable(
+      columns: const [
+        DataColumn(label: Text('ID')),
+        DataColumn(label: Text('User')),
+        DataColumn(label: Text('Subject')),
+        DataColumn(label: Text('Status')),
+        DataColumn(label: Text('Created')),
+        DataColumn(label: Text('Actions')),
+      ],
+      rows: List<DataRow>.generate(_complaints.length, (index) {
+        final c = _getComplaintByIndex(index);
+        final email = _getUserEmail(c);
+        final studentNo = _getStudentNumber(c);
+        final name = _getUserName(c);
+        final uid = _getUserId(c);
+        String userDisplay = (email.isNotEmpty)
+            ? email
+            : (studentNo.isNotEmpty)
+                ? studentNo
+                : (name.isNotEmpty)
+                    ? name
+                    : (uid.isNotEmpty ? uid : 'Unknown');
+        if (userDisplay == 'Unknown') {
+          final any = _getAnyUserIdentifier(c);
+          if (any.isNotEmpty) userDisplay = any;
+        }
+
+        return DataRow(cells: [
+          DataCell(Text('#${_getComplaintId(c)}')),
+          DataCell(Text(userDisplay)),
+          DataCell(SizedBox(width: 200, child: Text(_getSubject(c), overflow: TextOverflow.ellipsis))),
+          DataCell(Text(_getStatus(c))),
+          DataCell(Text(_formatDate(_getCreatedAt(c)))),
+          DataCell(
+            TextButton.icon(
+              icon: const Icon(Icons.visibility, size: 16),
+              label: const Text('View'),
+              onPressed: () => _showComplaintDetails(c),
+            ),
+          ),
+        ]);
+      }),
+    );
+  }
+
+  String _formatDate(String? dateStr) {
+    if (dateStr == null || dateStr.isEmpty) return 'N/A';
+    try {
+      final date = DateTime.parse(dateStr);
+      return '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+    } catch (_) {
+      return dateStr;
+    }
   }
 }

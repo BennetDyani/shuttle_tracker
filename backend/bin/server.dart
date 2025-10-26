@@ -1243,7 +1243,13 @@ Future<Response> _createComplaintHandler(Request request) async {
 
 Future<Response> _getAllComplaintsHandler(Request request) async {
   try {
-    final result = await db.query('SELECT * FROM complaints');
+    // Join with complaint_status to get status_name
+    final result = await db.query('''
+      SELECT c.*, cs.status_name
+      FROM complaints c
+      LEFT JOIN complaint_status cs ON c.status_id = cs.status_id
+      ORDER BY c.created_at DESC
+    ''');
     return Response.ok(_jsonEncodeSafe(result.map((row) => row.toColumnMap()).toList()));
   } catch (e) {
     return Response.internalServerError(body: _jsonEncodeSafe({'error': 'Something went wrong'}));
@@ -1252,7 +1258,12 @@ Future<Response> _getAllComplaintsHandler(Request request) async {
 
 Future<Response> _getComplaintByIdHandler(Request request, String id) async {
   try {
-    final result = await db.query('SELECT * FROM complaints WHERE complaint_id = @id', substitutionValues: {'id': int.parse(id)});
+    final result = await db.query('''
+      SELECT c.*, cs.status_name
+      FROM complaints c
+      LEFT JOIN complaint_status cs ON c.status_id = cs.status_id
+      WHERE c.complaint_id = @id
+    ''', substitutionValues: {'id': int.parse(id)});
     if (result.isNotEmpty) {
       return Response.ok(_jsonEncodeSafe(result.first.toColumnMap()));
     } else {

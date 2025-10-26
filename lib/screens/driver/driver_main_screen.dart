@@ -1,10 +1,9 @@
 import 'package:flutter/material.dart';
+import 'driver_dashboard.dart';
 import 'route_screen.dart';
 import 'stop_screen.dart';
-import 'schedule_screen.dart';
 import 'report_maintenance.dart';
 import 'profile_page.dart';
-import 'settings_page.dart';
 
 class DriverMainScreen extends StatefulWidget {
   const DriverMainScreen({super.key});
@@ -17,12 +16,11 @@ class _DriverMainScreenState extends State<DriverMainScreen> {
   int _currentIndex = 0;
 
   final List<Widget> _screens = [
-  // TODO: Implement or import DriverDashboard widget
-  Container(), // Placeholder for DriverDashboard
-    DriverRouteScreen(),
-    DriverStopsScreen(),
-    ReportMaintenanceScreen(),
-    DriverProfilePage(),
+    const DriverDashboard(),
+    const DriverRouteScreen(),
+    const StopScreen(),
+    const ReportMaintenanceScreen(),
+    const DriverProfilePage(),
   ];
 
   void _onTabTapped(int index) {
