@@ -53,6 +53,12 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
+        leading: Navigator.canPop(context)
+            ? IconButton(
+                icon: const Icon(Icons.arrow_back),
+                onPressed: () => Navigator.of(context).pop(),
+              )
+            : null,
         title: const Text('Notifications'),
         centerTitle: true,
         actions: const [DashboardAction()],

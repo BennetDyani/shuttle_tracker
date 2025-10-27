@@ -25,7 +25,7 @@ class Shuttle {
 
   factory Shuttle.fromJson(Map<String, dynamic> json) {
     return Shuttle(
-      id: json['shuttle_id'],
+      id: json['shuttle_id'] ?? json['shuttleId'] ?? json['id'],
       make: json['make'] ?? json['Make'] ?? '',
       model: json['model'] ?? json['Model'] ?? '',
       year: (json['year'] is int) ? json['year'] : int.tryParse('${json['year']}') ?? 0,

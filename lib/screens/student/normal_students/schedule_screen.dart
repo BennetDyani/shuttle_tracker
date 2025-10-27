@@ -178,6 +178,12 @@ class _StudentScheduleScreenState extends State<StudentScheduleScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
+        leading: Navigator.canPop(context)
+            ? IconButton(
+                icon: const Icon(Icons.arrow_back),
+                onPressed: () => Navigator.of(context).pop(),
+              )
+            : null,
         title: const Text('My Schedule'),
         centerTitle: true,
         actions: [

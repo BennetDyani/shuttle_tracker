@@ -1,32 +1,58 @@
-import 'Route.dart' as DriverRoute;
-
 class Stop {
-  final int stopId; // Java Long -> Dart int
-  DriverRoute.Route route;
-  String stopName;
-  int sequence;
+  final int? stopId;
+  final int routeId;
+  String name;
+  double latitude;
+  double longitude;
+  int order;
 
   Stop({
-    required this.stopId,
-    required this.route,
-    required this.stopName,
-    required this.sequence,
+    this.stopId,
+    required this.routeId,
+    required this.name,
+    required this.latitude,
+    required this.longitude,
+    required this.order,
   });
 
-  // JSON serialization/deserialization
   factory Stop.fromJson(Map<String, dynamic> json) {
     return Stop(
-      stopId: json['stopId'],
-      route: DriverRoute.Route.fromJson(json['route']),
-      stopName: json['stopName'],
-      sequence: json['sequence'],
+      stopId: json['stop_id'] ?? json['stopId'] ?? json['id'],
+      routeId: json['route_id'] ?? json['routeId'] ?? 0,
+      name: json['name'] ?? '',
+      latitude: (json['latitude'] is num) ? (json['latitude'] as num).toDouble() : double.tryParse(json['latitude']?.toString() ?? '0') ?? 0.0,
+      longitude: (json['longitude'] is num) ? (json['longitude'] as num).toDouble() : double.tryParse(json['longitude']?.toString() ?? '0') ?? 0.0,
+      order: json['order'] ?? json['stop_order'] ?? 0,
     );
   }
 
-  Map<String, dynamic> toJson() => {
-    'stopId': stopId,
-    'route': route.toJson(),
-    'stopName': stopName,
-    'sequence': sequence,
-  };
+  Map<String, dynamic> toJson() {
+    return {
+      if (stopId != null) 'stop_id': stopId,
+      'route_id': routeId,
+      'name': name,
+      'latitude': latitude,
+      'longitude': longitude,
+      'order': order,
+    };
+  }
+
+  Stop copyWith({
+    int? stopId,
+    int? routeId,
+    String? name,
+    double? latitude,
+    double? longitude,
+    int? order,
+  }) {
+    return Stop(
+      stopId: stopId ?? this.stopId,
+      routeId: routeId ?? this.routeId,
+      name: name ?? this.name,
+      latitude: latitude ?? this.latitude,
+      longitude: longitude ?? this.longitude,
+      order: order ?? this.order,
+    );
+  }
 }
+

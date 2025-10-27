@@ -22,7 +22,7 @@ class _WsLocationDemoScreenState extends State<WsLocationDemoScreen> {
   final _logs = <String>[];
   StreamSubscription? _timerSub;
 
-  final _ws = LocationWsService();
+  final _ws = LocationWebSocketService();
   bool _autoSend = false;
 
   void _append(String msg) {
@@ -30,14 +30,13 @@ class _WsLocationDemoScreenState extends State<WsLocationDemoScreen> {
   }
 
   void _connect() {
-    _ws.connect(onConnected: (frame) {
-      final sessionHeader = frame.headers == null ? null : frame.headers!['session'];
-      _append('Connected: session ${sessionHeader ?? ''}');
-      _ws.subscribeToLocations((LocationMessageDto msg) {
-        _append('Received: driver=${msg.driverId}, shuttle=${msg.shuttleId}, lat=${msg.latitude}, lng=${msg.longitude}, ts=${msg.timestamp ?? 'null'}');
-      });
-    }, onError: (err) {
-      _append('Error: $err');
+    // Connect with demo driver and shuttle IDs
+    _ws.connect(1, 1);
+    _append('Connected to WebSocket');
+
+    // Subscribe to shuttle location updates
+    _ws.subscribeToShuttleLocation(1, (data) {
+      _append('Received: lat=${data['latitude']}, lng=${data['longitude']}');
     });
   }
 
@@ -54,17 +53,9 @@ class _WsLocationDemoScreenState extends State<WsLocationDemoScreen> {
       return;
     }
 
-    final tsRaw = _timestampCtrl.text.trim();
-    final ts = tsRaw.isEmpty ? null : tsRaw; // must be ISO-8601 if provided
-
-    _ws.sendLocationUpdate(
-      driverId: _driverIdCtrl.text.trim(),
-      shuttleId: _shuttleIdCtrl.text.trim(),
-      latitude: lat,
-      longitude: lng,
-      timestampIso8601: ts,
-    );
-    _append('Sent update to ${globals.appDestinationPrefix}/update-location');
+    // Send status update with location
+    _ws.sendStatusUpdate(1, 1, lat, lng, 'EN_ROUTE');
+    _append('Sent update: lat=$lat, lng=$lng');
   }
 
   void _toggleAutoSend() {

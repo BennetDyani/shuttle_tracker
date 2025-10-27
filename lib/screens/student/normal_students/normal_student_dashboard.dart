@@ -7,8 +7,9 @@ import 'route_screen.dart';
 import 'stop_screen.dart';
 import 'profile_page.dart';
 import 'complaints_screen.dart';
-import 'live_tracking_screen.dart';
-import 'schedule_screen.dart';
+import '../student_live_tracking_screen.dart';
+import '../student_schedule_screen.dart';
+import '../destination_subscription_screen.dart';
 import 'notifications_screen.dart';
 
 class NormalStudentDashboard extends StatefulWidget {
@@ -259,7 +260,7 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen> {
             ElevatedButton.icon(
               onPressed: () {
                 Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const LiveTrackingScreen()),
+                  MaterialPageRoute(builder: (_) => const StudentLiveTrackingScreen()),
                 );
               },
               icon: const Icon(Icons.location_searching, size: 18),
@@ -325,8 +326,10 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen> {
   }
 
   Widget _buildActionButtons(BuildContext context) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceAround,
+    return Wrap(
+      spacing: 12,
+      runSpacing: 12,
+      alignment: WrapAlignment.spaceAround,
       children: [
         _buildActionButton(context, Icons.directions_bus, "View Stops", () {
           Navigator.of(context).push(
@@ -338,7 +341,12 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen> {
             MaterialPageRoute(builder: (_) => const StudentScheduleScreen()),
           );
         }),
-        _buildActionButton(context, Icons.campaign_outlined, "Complaints/Feedback", () {
+        _buildActionButton(context, Icons.notifications_active, "Subscriptions", () {
+          Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const DestinationSubscriptionScreen()),
+          );
+        }),
+        _buildActionButton(context, Icons.campaign_outlined, "Complaints", () {
           Navigator.of(context).push(
             MaterialPageRoute(builder: (_) => const ComplaintsScreen()),
           );

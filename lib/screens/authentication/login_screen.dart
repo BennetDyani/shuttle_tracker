@@ -76,15 +76,25 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Widget _logo(BuildContext context) {
-    return CircleAvatar(
-      radius: 60,
-      backgroundColor: Theme.of(context).colorScheme.primary.withValues(alpha: 0.1),
-      child: Text(
-        'CPUT',
-        style: TextStyle(
-          color: Theme.of(context).colorScheme.primary,
-          fontWeight: FontWeight.bold,
-          fontSize: 22,
+    return Container(
+      width: 120,
+      height: 120,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: Colors.white,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.grey.withValues(alpha: 0.3),
+            spreadRadius: 2,
+            blurRadius: 5,
+          ),
+        ],
+      ),
+      padding: const EdgeInsets.all(12),
+      child: ClipOval(
+        child: Image.asset(
+          'assets/images/cput_logo.png',
+          fit: BoxFit.contain,
         ),
       ),
     );

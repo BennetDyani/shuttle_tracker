@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../../services/APIService.dart';
 import '../../../widgets/dashboard_action.dart';
-import 'live_tracking_screen.dart';
+import '../student_live_tracking_screen.dart';
 
 class RoutesScreen extends StatefulWidget {
   const RoutesScreen({super.key});
@@ -12,6 +12,7 @@ class RoutesScreen extends StatefulWidget {
 
 class _RoutesScreenState extends State<RoutesScreen> {
   List<dynamic> routes = [];
+  Map<String, dynamic> shuttleMap = {};
   bool isLoading = true;
   String? errorMessage;
 
@@ -27,6 +28,23 @@ class _RoutesScreenState extends State<RoutesScreen> {
       errorMessage = null;
     });
     try {
+      // Load shuttles first to filter bus routes
+      final shuttles = await APIService().fetchShuttles();
+      final busIds = <String>{};
+
+      for (var shuttle in shuttles) {
+        final type = shuttle['shuttleType']?.toString().toUpperCase() ??
+                     shuttle['shuttle_type']?.toString().toUpperCase() ?? '';
+        if (type == 'BUS') {
+          final id = shuttle['shuttleId']?.toString() ?? shuttle['shuttle_id']?.toString();
+          if (id != null) {
+            busIds.add(id);
+            shuttleMap[id] = shuttle;
+          }
+        }
+      }
+
+      // Load routes
       final result = await APIService().get('routes/getAll');
       // Normalize to a list in case backend wraps the response
       List<dynamic>? rawList;
@@ -36,8 +54,15 @@ class _RoutesScreenState extends State<RoutesScreen> {
         else if (result['routes'] is List) rawList = result['routes'] as List<dynamic>;
       }
       if (rawList == null) throw Exception('Invalid routes response: $result');
+
+      // Filter routes that use bus shuttles
+      final busRoutes = rawList.where((route) {
+        final shuttleId = route['shuttleId']?.toString() ?? route['shuttle_id']?.toString();
+        return shuttleId != null && busIds.contains(shuttleId);
+      }).toList();
+
       setState(() {
-        routes = rawList!;
+        routes = busRoutes;
         isLoading = false;
       });
     } catch (e) {
@@ -53,6 +78,17 @@ class _RoutesScreenState extends State<RoutesScreen> {
       if (r.containsKey(k) && r[k] != null) return r[k].toString();
     }
     return fallback;
+  }
+
+  String _getShuttleInfo(Map route) {
+    final shuttleId = route['shuttleId']?.toString() ?? route['shuttle_id']?.toString();
+    if (shuttleId != null && shuttleMap.containsKey(shuttleId)) {
+      final shuttle = shuttleMap[shuttleId];
+      return shuttle['licensePlate']?.toString() ??
+             shuttle['plate']?.toString() ??
+             'Bus';
+    }
+    return 'Bus';
   }
 
   @override
@@ -72,11 +108,55 @@ class _RoutesScreenState extends State<RoutesScreen> {
       body: isLoading
           ? const Center(child: CircularProgressIndicator())
           : errorMessage != null
-              ? Center(child: Text('Error: $errorMessage'))
-              : ListView.builder(
-                  padding: const EdgeInsets.all(16),
-                  itemCount: routes.length,
-                  itemBuilder: (context, index) {
+              ? Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(24.0),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.error_outline, size: 64, color: Colors.red),
+                        const SizedBox(height: 16),
+                        Text('Error: $errorMessage', textAlign: TextAlign.center),
+                        const SizedBox(height: 24),
+                        ElevatedButton.icon(
+                          onPressed: _fetchRoutes,
+                          icon: const Icon(Icons.refresh),
+                          label: const Text('Retry'),
+                        ),
+                      ],
+                    ),
+                  ),
+                )
+              : routes.isEmpty
+                  ? Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(24.0),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.directions_bus_outlined, size: 64, color: Colors.grey),
+                            const SizedBox(height: 16),
+                            const Text(
+                              'No bus routes available',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(fontSize: 16, color: Colors.grey),
+                            ),
+                            const SizedBox(height: 24),
+                            ElevatedButton.icon(
+                              onPressed: _fetchRoutes,
+                              icon: const Icon(Icons.refresh),
+                              label: const Text('Refresh'),
+                            ),
+                          ],
+                        ),
+                      ),
+                    )
+                  : RefreshIndicator(
+                      onRefresh: _fetchRoutes,
+                      child: ListView.builder(
+                        padding: const EdgeInsets.all(16),
+                        itemCount: routes.length,
+                        itemBuilder: (context, index) {
                     final raw = routes[index];
                     // ensure we have a Map-like object
                     final Map route = (raw is Map<String, dynamic>) ? raw : Map<String, dynamic>.from(raw as Map);
@@ -84,6 +164,7 @@ class _RoutesScreenState extends State<RoutesScreen> {
                     final start = _getField(route, ['start', 'origin', 'from'], 'Unknown');
                     final end = _getField(route, ['end', 'destination', 'to'], 'Unknown');
                     final hours = _getField(route, ['hours', 'operatingHours', 'schedule'], '-');
+                    final shuttleInfo = _getShuttleInfo(route);
 
                     return Card(
                       margin: const EdgeInsets.only(bottom: 16),
@@ -98,7 +179,30 @@ class _RoutesScreenState extends State<RoutesScreen> {
                               name,
                               style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                             ),
-                            const SizedBox(height: 8),
+                            const SizedBox(height: 12),
+                            // Shuttle info
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                              decoration: BoxDecoration(
+                                color: Colors.green.shade50,
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(Icons.directions_bus, color: Colors.green, size: 18),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    shuttleInfo,
+                                    style: const TextStyle(
+                                      color: Colors.green,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(height: 12),
                             Row(
                               children: [
                                 const Icon(Icons.play_arrow, size: 18, color: Colors.green),
@@ -126,7 +230,7 @@ class _RoutesScreenState extends State<RoutesScreen> {
                               child: ElevatedButton(
                                 onPressed: () {
                                   Navigator.of(context).push(
-                                    MaterialPageRoute(builder: (_) => const LiveTrackingScreen()),
+                                    MaterialPageRoute(builder: (_) => const StudentLiveTrackingScreen()),
                                   );
                                 },
                                 style: ElevatedButton.styleFrom(
@@ -141,6 +245,7 @@ class _RoutesScreenState extends State<RoutesScreen> {
                     );
                   },
                 ),
+              ),
     );
   }
 }

@@ -2,11 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../../services/APIService.dart';
 import '../../../providers/auth_provider.dart';
+import '../../../providers/notifications_provider.dart';
 import '../../../utils/logout_helper.dart';
 import 'accessible_routes.dart';
 import 'profile_page.dart';
 import 'report_issues.dart';
-import 'live_tracking.dart';
+import '../student_live_tracking_screen.dart';
+import '../student_schedule_screen.dart';
+import '../destination_subscription_screen.dart';
+import '../normal_students/notifications_screen.dart';
 
 class DisabledStudentDashboard extends StatefulWidget {
   const DisabledStudentDashboard({super.key});
@@ -146,6 +150,7 @@ class _DisabledStudentDashboardState extends State<DisabledStudentDashboard> {
 
     return Scaffold(
       appBar: AppBar(
+        automaticallyImplyLeading: false,
         centerTitle: true,
         title: Text(
           title,
@@ -153,6 +158,45 @@ class _DisabledStudentDashboardState extends State<DisabledStudentDashboard> {
           semanticsLabel: 'Dashboard title: $title',
         ),
         actions: [
+          // Notifications icon with unread count
+          Consumer<NotificationsProvider>(builder: (context, notif, _) {
+            return IconButton(
+              icon: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  const Icon(Icons.notifications, size: 28),
+                  if (!notif.isLoading && notif.unreadCount > 0)
+                    Positioned(
+                      right: 0,
+                      top: 0,
+                      child: Container(
+                        padding: const EdgeInsets.all(2),
+                        decoration: const BoxDecoration(color: Colors.red, shape: BoxShape.circle),
+                        constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
+                        child: Center(
+                          child: Text(
+                            notif.unreadCount > 99 ? '99+' : notif.unreadCount.toString(),
+                            style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+              onPressed: () async {
+                try {
+                  final auth = Provider.of<AuthProvider>(context, listen: false);
+                  final uidStr = auth.userId;
+                  final int? uid = uidStr != null && uidStr.isNotEmpty ? int.tryParse(uidStr) : null;
+                  await Provider.of<NotificationsProvider>(context, listen: false).refresh(userId: uid);
+                } catch (_) {}
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const NotificationsScreen()),
+                );
+              },
+              tooltip: 'Notifications',
+            );
+          }),
           IconButton(
             icon: const Icon(Icons.mic, size: 28),
             onPressed: () {
@@ -407,16 +451,30 @@ class _DisabledStudentDashboardState extends State<DisabledStudentDashboard> {
       alignment: WrapAlignment.center,
       children: [
         _actionButton(
-          'Track Shuttle',
+          'Track Minibus',
           Icons.location_on,
           Theme.of(context).primaryColor,
           buttonWidth,
-          () => Navigator.push(context, MaterialPageRoute(builder: (_) => const DisabledLiveTrackingScreen())),
+          () => Navigator.push(context, MaterialPageRoute(builder: (_) => const StudentLiveTrackingScreen())),
+        ),
+        _actionButton(
+          'Schedules',
+          Icons.schedule,
+          Colors.blue,
+          buttonWidth,
+          () => Navigator.push(context, MaterialPageRoute(builder: (_) => StudentScheduleScreen())),
+        ),
+        _actionButton(
+          'Subscriptions',
+          Icons.notifications_active,
+          Colors.green,
+          buttonWidth,
+          () => Navigator.push(context, MaterialPageRoute(builder: (_) => const DestinationSubscriptionScreen())),
         ),
         _actionButton(
           'View Routes',
           Icons.route,
-          Colors.green,
+          Colors.teal,
           buttonWidth,
           () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AccessibleRoutesScreen())),
         ),
