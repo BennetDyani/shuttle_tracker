@@ -89,6 +89,10 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () => Navigator.pop(context),
+        ),
         title: const Text('My Routes'),
         centerTitle: true,
         actions: [
@@ -272,7 +276,7 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                                               const SizedBox(width: 12),
                                               Expanded(
                                                 child: Text(
-                                                  stop.stopName,
+                                                  stop.name,
                                                   style: const TextStyle(fontSize: 15),
                                                 ),
                                               ),

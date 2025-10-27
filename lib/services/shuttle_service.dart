@@ -399,6 +399,75 @@ class ShuttleService {
     }
   }
 
+  // Fetch stops for a specific route
+  Future<List<Map<String, dynamic>>> getStopsByRoute(int routeId) async {
+    final response = await http.get(Uri.parse('$baseUrl/routes/$routeId/stops'));
+    debugPrint('[ShuttleService] GET $baseUrl/routes/$routeId/stops -> ${response.statusCode}');
+    debugPrint('[ShuttleService] stops response body: ${response.body}');
+    if (response.statusCode == 200) {
+      return _extractListFromBody(response.body, keysToTry: ['stops', 'data', 'items']);
+    } else {
+      throw Exception('Failed to fetch stops: ${response.statusCode} ${response.body}');
+    }
+  }
+
+  // Create a stop for a route
+  Future<Map<String, dynamic>> createStop({
+    required int routeId,
+    required String name,
+    required double latitude,
+    required double longitude,
+    required int order,
+  }) async {
+    final body = {
+      'routeId': routeId,
+      'name': name,
+      'latitude': latitude,
+      'longitude': longitude,
+      'order': order,
+    };
+    final response = await http.post(
+      Uri.parse('$baseUrl/stops'),
+      headers: <String, String>{'Content-Type': 'application/json; charset=UTF-8'},
+      body: jsonEncode(body),
+    );
+    debugPrint('[ShuttleService] POST $baseUrl/stops -> ${response.statusCode}');
+    debugPrint('[ShuttleService] create stop body: ${response.body}');
+    if (response.statusCode == 200) {
+      final Map<String, dynamic> data = json.decode(response.body);
+      return data['stop'] ?? data;
+    } else {
+      throw Exception('Failed to create stop: ${response.statusCode} ${response.body}');
+    }
+  }
+
+  // Add stop to a specific route
+  Future<Map<String, dynamic>> addStopToRoute({
+    required int routeId,
+    required String name,
+    required double latitude,
+    required double longitude,
+  }) async {
+    final body = {
+      'name': name,
+      'latitude': latitude,
+      'longitude': longitude,
+    };
+    final response = await http.post(
+      Uri.parse('$baseUrl/routes/$routeId/stops'),
+      headers: <String, String>{'Content-Type': 'application/json; charset=UTF-8'},
+      body: jsonEncode(body),
+    );
+    debugPrint('[ShuttleService] POST $baseUrl/routes/$routeId/stops -> ${response.statusCode}');
+    debugPrint('[ShuttleService] add stop to route body: ${response.body}');
+    if (response.statusCode == 200) {
+      final Map<String, dynamic> data = json.decode(response.body);
+      return data['stop'] ?? data;
+    } else {
+      throw Exception('Failed to add stop to route: ${response.statusCode} ${response.body}');
+    }
+  }
+
   // Delete a schedule
   Future<void> deleteSchedule(dynamic scheduleId) async {
     final response = await http.delete(Uri.parse('$baseUrl/schedules/$scheduleId'));

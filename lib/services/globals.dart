@@ -4,7 +4,7 @@ import 'package:flutter/widgets.dart';
 
 String loggedInUserId = "";
 
-// Base URL for API (Windows localhost). Include path prefix if your API is under /api or /api/v1
+// Base URL for API
 String apiBaseUrl = "http://localhost:8080/api";
 
 // Auth token (Bearer) updated by AuthProvider when available

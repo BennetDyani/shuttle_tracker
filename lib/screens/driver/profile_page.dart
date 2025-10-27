@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../services/APIService.dart';
 import '../../services/endpoints.dart';
-import '../../models/driver_model/Driver.dart';
 import '../../providers/auth_provider.dart';
 
 class DriverProfilePage extends StatefulWidget {
@@ -98,6 +97,10 @@ class _DriverProfilePageState extends State<DriverProfilePage> {
 
     return Scaffold(
       appBar: AppBar(
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () => Navigator.pop(context),
+        ),
         title: const Text('Profile'),
         centerTitle: true,
       ),

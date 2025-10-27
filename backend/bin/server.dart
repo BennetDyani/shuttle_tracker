@@ -156,6 +156,33 @@ String _hashPassword(String password) {
   return digest.toString();
 }
 
+// CORS middleware - allows browsers to access the API
+Middleware corsHeaders() {
+  return (Handler innerHandler) {
+    return (Request request) async {
+      // Handle preflight OPTIONS requests
+      if (request.method == 'OPTIONS') {
+        return Response.ok('', headers: {
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+          'Access-Control-Allow-Headers': 'Origin, Content-Type, Accept, Authorization',
+          'Access-Control-Max-Age': '86400',
+        });
+      }
+
+      // Process the request
+      final response = await innerHandler(request);
+
+      // Add CORS headers to the response
+      return response.change(headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+        'Access-Control-Allow-Headers': 'Origin, Content-Type, Accept, Authorization',
+      });
+    };
+  };
+}
+
 // JSON helper: encodes DateTime (and nested structures) safely
 String _jsonEncodeSafe(Object? data) {
   final encoder = JsonEncoder.withIndent(null, (obj) {
@@ -1548,10 +1575,112 @@ Future<Response> _getScheduleByDriverIdHandler(Request request, String driverId)
 
 Future<Response> _getAllSchedulesHandler(Request request) async {
   try {
-    final result = await db.query('SELECT schedule_id, route_id, departure_time::text AS departure_time, arrival_time::text AS arrival_time, day_of_week FROM schedules');
-    return Response.ok(_jsonEncodeSafe(result.map((row) => row.toColumnMap()).toList()));
+    // Enhanced query to fetch complete schedule information with JOINs
+    final query = '''
+      SELECT 
+        s.schedule_id,
+        s.route_id,
+        s.departure_time::text AS departure_time,
+        s.arrival_time::text AS arrival_time,
+        s.day_of_week,
+        r.route_name,
+        r.origin,
+        r.destination,
+        sh.shuttle_id,
+        sh.license_plate,
+        sh.shuttle_type,
+        sh.capacity,
+        sh.status as shuttle_status,
+        da.driver_id,
+        u.first_name as driver_first_name,
+        u.last_name as driver_last_name
+      FROM schedules s
+      LEFT JOIN routes r ON s.route_id = r.route_id
+      LEFT JOIN driver_assignments da ON s.schedule_id = da.schedule_id 
+        AND da.assignment_date = CURRENT_DATE
+      LEFT JOIN shuttles sh ON da.shuttle_id = sh.shuttle_id
+      LEFT JOIN drivers d ON da.driver_id = d.driver_id
+      LEFT JOIN users u ON d.user_id = u.user_id
+      ORDER BY s.departure_time, s.schedule_id
+    ''';
+
+    final result = await db.query(query);
+
+    // Transform the results to a more user-friendly format
+    final schedules = result.map((row) {
+      final map = row.toColumnMap();
+      return {
+        'scheduleId': map['schedule_id'],
+        'schedule_id': map['schedule_id'],
+        'routeId': map['route_id'],
+        'route_id': map['route_id'],
+        'routeName': map['route_name'] ?? 'Unknown Route',
+        'route': map['route_name'] ?? 'Unknown Route',
+        'origin': map['origin'] ?? 'Start',
+        'destination': map['destination'] ?? 'End',
+        'departureTime': map['departure_time'] ?? 'N/A',
+        'departure_time': map['departure_time'],
+        'arrivalTime': map['arrival_time'] ?? 'N/A',
+        'arrival_time': map['arrival_time'],
+        'day': map['day_of_week'] ?? 'Daily',
+        'dayOfWeek': map['day_of_week'],
+        'status': _determineScheduleStatus(map['departure_time'], map['arrival_time']),
+        'shuttleId': map['shuttle_id'],
+        'shuttle_id': map['shuttle_id'],
+        'licensePlate': map['license_plate'] ?? 'Unknown',
+        'plate': map['license_plate'],
+        'shuttleType': map['shuttle_type'] ?? 'BUS',
+        'type': map['shuttle_type'],
+        'capacity': map['capacity'] ?? 0,
+        'shuttleStatus': map['shuttle_status'] ?? 'AVAILABLE',
+        'driverId': map['driver_id'],
+        'driverName': map['driver_first_name'] != null && map['driver_last_name'] != null
+            ? '${map['driver_first_name']} ${map['driver_last_name']}'
+            : 'Assigned',
+      };
+    }).toList();
+
+    return Response.ok(_jsonEncodeSafe(schedules));
+  } catch (e, st) {
+    stderr.writeln('[_getAllSchedulesHandler] Error: $e\n$st');
+    return Response.internalServerError(body: _jsonEncodeSafe({
+      'error': 'Failed to fetch schedules',
+      'details': e.toString()
+    }));
+  }
+}
+
+// Helper function to determine schedule status based on time
+String _determineScheduleStatus(dynamic departureTime, dynamic arrivalTime) {
+  if (departureTime == null) return 'scheduled';
+
+  try {
+    final now = DateTime.now();
+    final todayStr = '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+
+    // Parse times (format: HH:MM:SS or HH:MM)
+    final depParts = departureTime.toString().split(':');
+    final departure = DateTime.parse('$todayStr ${depParts[0].padLeft(2, '0')}:${depParts[1].padLeft(2, '0')}:00');
+
+    if (arrivalTime != null) {
+      final arrParts = arrivalTime.toString().split(':');
+      final arrival = DateTime.parse('$todayStr ${arrParts[0].padLeft(2, '0')}:${arrParts[1].padLeft(2, '0')}:00');
+
+      if (now.isAfter(departure) && now.isBefore(arrival)) {
+        return 'active';
+      } else if (now.isAfter(arrival)) {
+        return 'completed';
+      }
+    } else {
+      // If no arrival time, consider active for 2 hours after departure
+      if (now.isAfter(departure) && now.isBefore(departure.add(Duration(hours: 2)))) {
+        return 'active';
+      }
+    }
+
+    return 'scheduled';
   } catch (e) {
-    return Response.internalServerError(body: _jsonEncodeSafe({'error': 'Something went wrong'}));
+    return 'scheduled';
   }
 }
 
@@ -2044,7 +2173,11 @@ void main(List<String> args) async {
 
   final ip = InternetAddress.anyIPv4;
   // Use the rootRouter that exposes '/', '/api/', and '/api/v1/'
-  final handler = Pipeline().addMiddleware(logRequests()).addHandler(rootRouter);
+  // Add CORS middleware to allow browser access
+  final handler = Pipeline()
+      .addMiddleware(logRequests())
+      .addMiddleware(corsHeaders())
+      .addHandler(rootRouter);
   // Try to bind to PORT (default 8080); if it's in use, try up to +9 ports.
   final basePort = int.parse(Platform.environment['PORT'] ?? '8080');
   HttpServer? httpServer;

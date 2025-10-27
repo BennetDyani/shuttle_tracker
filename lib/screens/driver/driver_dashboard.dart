@@ -5,7 +5,7 @@ import '../../services/APIService.dart';
 import '../../services/endpoints.dart';
 import '../../services/logout_helper.dart';
 import '../../models/driver_model/Driver.dart';
-import '../../models/driver_model/Shuttle.dart';
+import '../../models/shuttle_model.dart';
 import '../../services/shuttle_service.dart';
 import 'live_route_tracking.dart';
 import 'schedule_screen.dart';
@@ -139,7 +139,7 @@ class _DriverDashboardState extends State<DriverDashboard> {
     }
   }
 
-  // Load the driver's assignment and resolve shuttle details (label + capacity)
+  // Load the driver's assignment and resolve shuttle details (label + capacity), schedule, and route info
   Future<void> _loadAssignmentForDriver(int driverId) async {
     if (mounted) setState(() => assignmentLoading = true);
     try {
@@ -169,18 +169,62 @@ class _DriverDashboardState extends State<DriverDashboard> {
       String shuttleCap = '-';
       if (shuttleIdRaw.isNotEmpty) {
         try {
-          // ShuttleService.getShuttles() returns List<Shuttle>; handle Shuttle objects directly
-          final List<Shuttle> shuttles = (await _shuttleService.getShuttles()).cast<Shuttle>();
+          // ShuttleService.getShuttles() returns List<Shuttle> from shuttle_model.dart
+          final List<Shuttle> shuttles = await _shuttleService.getShuttles();
           for (final s in shuttles) {
-            final sid = s.shuttleId.toString();
+            // shuttle_model uses 'id' field which can be null
+            final sid = s.id?.toString() ?? '';
             if (sid.isNotEmpty && sid == shuttleIdRaw) {
               shuttleLabel = s.licensePlate;
               shuttleCap = s.capacity.toString();
               break;
             }
           }
+        } catch (e) {
+          debugPrint('[DriverDashboard] Error fetching shuttles: $e');
+        }
+      }
+
+      // Resolve schedule and route info
+      final scheduleIdRaw = (matched['scheduleId'] ?? matched['schedule_id'] ?? matched['schedule'])?.toString() ?? '';
+      if (scheduleIdRaw.isNotEmpty) {
+        try {
+          final schedules = await _shuttleService.getSchedules();
+          Map<String, dynamic>? scheduleMatch;
+          for (final s in schedules) {
+            final sid = (s['schedule_id'] ?? s['scheduleId'] ?? s['id'])?.toString();
+            if (sid == scheduleIdRaw) {
+              scheduleMatch = s;
+              break;
+            }
+          }
+
+          if (scheduleMatch != null) {
+            // Add schedule times to the matched assignment
+            matched['departure_time'] = scheduleMatch['departure_time'] ?? scheduleMatch['departureTime'] ?? scheduleMatch['start_time'];
+            matched['arrival_time'] = scheduleMatch['arrival_time'] ?? scheduleMatch['arrivalTime'] ?? scheduleMatch['end_time'];
+            matched['day_of_week'] = scheduleMatch['day_of_week'] ?? scheduleMatch['dayOfWeek'] ?? scheduleMatch['day'];
+
+            // Resolve route info from schedule
+            final routeIdRaw = (scheduleMatch['route_id'] ?? scheduleMatch['routeId'] ?? scheduleMatch['route'])?.toString() ?? '';
+            if (routeIdRaw.isNotEmpty) {
+              try {
+                final routes = await _shuttleService.getRoutes();
+                for (final r in routes) {
+                  final rid = (r['route_id'] ?? r['routeId'] ?? r['id'])?.toString();
+                  if (rid == routeIdRaw) {
+                    matched['route_name'] = r['name'] ?? r['routeName'] ?? r['route_name'] ?? 'Unknown Route';
+                    matched['route_description'] = r['description'] ?? r['route_description'] ?? '';
+                    break;
+                  }
+                }
+              } catch (_) {
+                // ignore route fetch errors
+              }
+            }
+          }
         } catch (_) {
-          // ignore shuttle fetch errors
+          // ignore schedule fetch errors
         }
       }
 
@@ -236,6 +280,7 @@ class _DriverDashboardState extends State<DriverDashboard> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
+        automaticallyImplyLeading: false,
         title: Text(_isLoadingName ? 'Driver Dashboard' : 'Hi, $_displayName'),
         actions: [
           IconButton(
@@ -326,6 +371,24 @@ class _DriverDashboardState extends State<DriverDashboard> {
   }
 
   Widget _buildDriverInfo() {
+    // Get name from driver's user or user row
+    String driverName = '';
+    if (driver != null && driver!.user.userId > 0) {
+      final first = driver!.user.name;
+      final last = driver!.user.surname;
+      driverName = '$first $last'.trim();
+    }
+    if (driverName.isEmpty && userRow != null) {
+      final first = (userRow!['first_name'] ?? userRow!['name'] ?? '').toString();
+      final last = (userRow!['last_name'] ?? userRow!['surname'] ?? '').toString();
+      driverName = '$first $last'.trim();
+    }
+
+    final email = driver?.user.email ?? userRow?['email']?.toString() ?? 'Not available';
+    final phone = driver?.phoneNumber ?? driver?.user.phoneNumber ?? userRow?['phone_number']?.toString() ?? 'Not provided';
+    final license = driver?.licenseNumber ?? driver?.driverLicense ?? 'Not available';
+    final status = driver?.status ?? 'Active';
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -334,16 +397,24 @@ class _DriverDashboardState extends State<DriverDashboard> {
           style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
         ),
         const SizedBox(height: 16),
-        _buildInfoRow('License', driver?.licenseNumber ?? 'Not available'),
+        if (driverName.isNotEmpty) ...[
+          _buildInfoRow('Name', driverName),
+          const SizedBox(height: 8),
+        ],
+        _buildInfoRow('Email', email),
         const SizedBox(height: 8),
-        _buildInfoRow('Status', driver?.status ?? 'Active'),
+        _buildInfoRow('Phone', phone),
         const SizedBox(height: 8),
-        _buildInfoRow('Phone', driver?.phoneNumber ?? userRow?['phone_number'] ?? 'Not provided'),
+        _buildInfoRow('License', license),
+        const SizedBox(height: 8),
+        _buildInfoRow('Status', status),
       ],
     );
   }
 
   Widget _buildShuttleInfo() {
+    final hasShuttle = assignedShuttleLabel != '-' && assignedShuttleLabel.isNotEmpty;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -352,11 +423,54 @@ class _DriverDashboardState extends State<DriverDashboard> {
           style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
         ),
         const SizedBox(height: 16),
-        _buildInfoRow('Shuttle', assignedShuttleLabel),
-        const SizedBox(height: 8),
-        _buildInfoRow('Capacity', '$assignedShuttleCapacity seats'),
-        const SizedBox(height: 8),
-        _buildInfoRow('Status', shuttleStatus),
+        if (!hasShuttle) ...[
+          _buildInfoRow('Status', 'No shuttle assigned'),
+          const SizedBox(height: 8),
+          const Text(
+            'Please contact administrator to assign a shuttle.',
+            style: TextStyle(
+              fontSize: 14,
+              color: Colors.grey,
+              fontStyle: FontStyle.italic,
+            ),
+          ),
+        ] else ...[
+          _buildInfoRow('License Plate', assignedShuttleLabel),
+          const SizedBox(height: 8),
+          _buildInfoRow('Capacity', assignedShuttleCapacity != '-' ? '$assignedShuttleCapacity seats' : 'Unknown'),
+          const SizedBox(height: 8),
+          _buildInfoRow('Status', shuttleStatus),
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: shuttleStatus == 'Available' ? Colors.green.shade50 : Colors.orange.shade50,
+              borderRadius: BorderRadius.circular(4),
+              border: Border.all(
+                color: shuttleStatus == 'Available' ? Colors.green.shade200 : Colors.orange.shade200,
+              ),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  shuttleStatus == 'Available' ? Icons.check_circle : Icons.warning,
+                  size: 16,
+                  color: shuttleStatus == 'Available' ? Colors.green : Colors.orange,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  shuttleStatus == 'Available' ? 'Ready for service' : 'Requires attention',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                    color: shuttleStatus == 'Available' ? Colors.green.shade700 : Colors.orange.shade700,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ],
     );
   }
@@ -497,7 +611,53 @@ class _DriverDashboardState extends State<DriverDashboard> {
     );
   }
 
+  String _formatTime(String? time) {
+    if (time == null || time.trim().isEmpty) return 'Not set';
+    try {
+      // Try parsing as HH:mm first
+      final parts = time.split(':');
+      if (parts.length >= 2) {
+        final hour = int.tryParse(parts[0]);
+        final minute = int.tryParse(parts[1]);
+        if (hour != null && minute != null) {
+          final period = hour >= 12 ? 'PM' : 'AM';
+          final displayHour = hour > 12 ? hour - 12 : (hour == 0 ? 12 : hour);
+          return '${displayHour.toString().padLeft(2, '0')}:${minute.toString().padLeft(2, '0')} $period';
+        }
+      }
+      return time;
+    } catch (_) {
+      return time;
+    }
+  }
+
   List<Widget> _buildAssignmentDetails() {
+    if (activeAssignment == null) {
+      return [
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'No Active Assignment',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w500,
+                color: Colors.grey,
+              ),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'You have not been assigned to a route yet. Please contact your administrator.',
+              style: TextStyle(
+                fontSize: 14,
+                color: Colors.grey,
+              ),
+            ),
+          ],
+        ),
+      ];
+    }
+
     return [
       Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -513,10 +673,18 @@ class _DriverDashboardState extends State<DriverDashboard> {
           _buildInfoRow('Route', activeAssignment?['route_name'] ?? 'Not assigned'),
           const SizedBox(height: 8),
           _buildInfoRow(
-            'Schedule',
-            activeAssignment?['schedule_id'] != null
-                ? 'Schedule ${activeAssignment!['schedule_id']}'
-                : 'Not assigned',
+            'Day',
+            activeAssignment?['day_of_week'] ?? 'Not set',
+          ),
+          const SizedBox(height: 8),
+          _buildInfoRow(
+            'Departure',
+            _formatTime(activeAssignment?['departure_time']?.toString()),
+          ),
+          const SizedBox(height: 8),
+          _buildInfoRow(
+            'Arrival',
+            _formatTime(activeAssignment?['arrival_time']?.toString()),
           ),
         ],
       ),
@@ -524,7 +692,7 @@ class _DriverDashboardState extends State<DriverDashboard> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
-            'Status',
+            'Assignment Status',
             style: TextStyle(
               fontSize: 16,
               fontWeight: FontWeight.bold,
@@ -532,12 +700,18 @@ class _DriverDashboardState extends State<DriverDashboard> {
           ),
           const SizedBox(height: 12),
           _buildInfoRow('Service', inService ? 'In Service' : 'Not in Service'),
-          if (activeAssignment != null) ...[
-            const SizedBox(height: 8),
-            _buildInfoRow('Start Time', activeAssignment!['start_time'] ?? 'Not set'),
-            const SizedBox(height: 8),
-            _buildInfoRow('End Time', activeAssignment!['end_time'] ?? 'Not set'),
-          ],
+          const SizedBox(height: 8),
+          _buildInfoRow(
+            'Shuttle',
+            assignedShuttleLabel != '-' ? assignedShuttleLabel : 'Not assigned',
+          ),
+          const SizedBox(height: 8),
+          _buildInfoRow(
+            'Schedule ID',
+            activeAssignment?['schedule_id']?.toString() ??
+            activeAssignment?['scheduleId']?.toString() ??
+            'Not set',
+          ),
         ],
       ),
     ];

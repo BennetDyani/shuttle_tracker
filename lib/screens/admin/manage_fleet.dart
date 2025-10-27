@@ -118,6 +118,16 @@ class _ManageFleetScreenState extends State<ManageFleetScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () {
+            if (Navigator.canPop(context)) {
+              Navigator.pop(context);
+            } else {
+              Navigator.pushReplacementNamed(context, '/admin/dashboard');
+            }
+          },
+        ),
         title: const Text('Fleet Management'),
         actions: [
           IconButton(icon: const Icon(Icons.refresh), tooltip: 'Refresh', onPressed: _fetchShuttles),

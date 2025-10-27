@@ -376,6 +376,16 @@ class _ManageDriversScreenState extends State<ManageDriversScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () {
+            if (Navigator.canPop(context)) {
+              Navigator.pop(context);
+            } else {
+              Navigator.pushReplacementNamed(context, '/admin/dashboard');
+            }
+          },
+        ),
         title: const Text('Manage Drivers'),
         actions: [
           IconButton(

@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../../providers/auth_provider.dart';
 import 'package:shuttle_tracker/services/location_ws_service.dart';
-import 'package:shuttle_tracker/services/location_stomp_client.dart';
 import 'package:shuttle_tracker/models/driver_model/location_status.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
@@ -20,7 +19,7 @@ class LiveTrackingScreen extends StatefulWidget {
 }
 
 class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
-  final LocationWsService _ws = LocationWsService();
+  final LocationWebSocketService _ws = LocationWebSocketService();
 
   // Latest shuttle state from WS / polling
   double? _shuttleLat;
@@ -28,9 +27,6 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
   String? _latestStatus; // raw status string (enum name)
   String? _latestDriverId;
   String? _latestShuttleId;
-
-  // Small history (optional)
-  final List<LocationMessageDto> _messages = [];
 
   // Map
   final MapController _mapController = MapController();
@@ -41,82 +37,52 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
   @override
   void initState() {
     super.initState();
-    // Connect and subscribe
+    // TODO: Implement proper WebSocket connection when backend is ready
+    // For now, using placeholder to avoid compilation errors
     try {
-      _ws.connect(onConnected: (_) {
-        // If polling was active, stop it
-        try {
-          _pollCancel?.call();
-        } catch (_) {}
-        _pollCancel = null;
+      // Connect with example shuttle ID
+      _ws.connect(1, 1);
 
-        // Subscribe only after the client is connected/activated
-        _ws.subscribeToLocations((msg) {
-          if (!mounted) return;
-          setState(() {
-            _latestDriverId = msg.driverId;
-            _latestShuttleId = msg.shuttleId;
-            _shuttleLat = msg.latitude;
-            _shuttleLng = msg.longitude;
-            _latestStatus = msg.status;
-            _messages.insert(0, msg);
-            if (_messages.length > 50) _messages.removeRange(50, _messages.length);
-          });
-
-          // Show transient alert for status updates
-          if (msg.status != null && mounted) {
-            try {
-              final s = LocationStatusExtension.fromString(msg.status!);
-              final label = s.label;
-              ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                content: Text('${msg.shuttleId} — $label'),
-                duration: const Duration(seconds: 4),
-              ));
-            } catch (_) {
-              if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${msg.shuttleId} — ${msg.status}')));
-            }
-          }
+      // Subscribe to shuttle location
+      _ws.subscribeToShuttleLocation(1, (data) {
+        if (!mounted) return;
+        setState(() {
+          _shuttleLat = data['latitude'] as double?;
+          _shuttleLng = data['longitude'] as double?;
+          _latestShuttleId = data['shuttleId']?.toString();
+          _latestStatus = data['status'] as String?;
         });
-      }, onError: (err) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('WS error: $err')));
-        }
-        // Start polling fallback if WS fails
-        if (_pollCancel == null) {
-          _pollCancel = LocationPollingService().subscribe(onMessage: (ModelMsg.LocationMessage m) {
-            if (!mounted) return;
-            setState(() {
-              _latestDriverId = m.driverId?.toString();
-              _latestShuttleId = m.shuttleId?.toString();
-              _shuttleLat = null;
-              _shuttleLng = null;
-              _latestStatus = m.locationStatus.toString().split('.').last;
-            });
-            // show status alert
-            try {
-              final s = m.locationStatus;
-              ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${_latestShuttleId ?? 'Shuttle'} — ${s.label}')));
-            } catch (_) {}
-          });
-        }
       });
 
-      // If already connected (rare), subscribe immediately
-      if (_ws.isConnected) {
-        _ws.subscribeToLocations((msg) {
+      // Subscribe to status updates
+      _ws.subscribeToShuttleStatus(1, (data) {
+        if (!mounted) return;
+        setState(() {
+          _latestStatus = data['status'] as String?;
+        });
+        // Show status notification
+        if (_latestStatus != null && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Shuttle status: $_latestStatus')),
+          );
+        }
+      });
+    } catch (e) {
+      debugPrint('WebSocket connection error: $e');
+      // Fallback to polling if needed
+      if (_pollCancel == null) {
+        _pollCancel = LocationPollingService().subscribe(onMessage: (ModelMsg.LocationMessage m) {
           if (!mounted) return;
           setState(() {
-            _latestDriverId = msg.driverId;
-            _latestShuttleId = msg.shuttleId;
-            _shuttleLat = msg.latitude;
-            _shuttleLng = msg.longitude;
-            _latestStatus = msg.status;
-            _messages.insert(0, msg);
-            if (_messages.length > 50) _messages.removeRange(50, _messages.length);
+            _latestDriverId = m.driverId?.toString();
+            _latestShuttleId = m.shuttleId?.toString();
+            _shuttleLat = null;
+            _shuttleLng = null;
+            _latestStatus = m.locationStatus.toString().split('.').last;
           });
         });
       }
-    } catch (_) {}
+    }
   }
 
   @override
@@ -141,108 +107,88 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
         leading: Navigator.canPop(context)
             ? IconButton(
                 icon: const Icon(Icons.arrow_back),
-                onPressed: () => Navigator.of(context).pop(),
+                onPressed: () => Navigator.pop(context),
               )
             : null,
-        actions: [
-          const DashboardAction(),
-        ],
       ),
       body: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          SizedBox(
-            height: 300,
-            child: FlutterMap(
-              mapController: _mapController,
-              options: MapOptions(
-                // keep minimal options to stay compatible with the project's flutter_map version
-                onPositionChanged: (pos, _) {
-                  // no-op, could sync zoom if desired
-                },
+          // Status banner
+          if (_latestStatus != null)
+            Container(
+              padding: const EdgeInsets.all(12),
+              color: _getStatusColor(_latestStatus),
+              width: double.infinity,
+              child: Text(
+                'Shuttle ${_latestShuttleId ?? 'Unknown'}: ${_getStatusLabel(_latestStatus)}',
+                style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                textAlign: TextAlign.center,
               ),
-              children: [
-                TileLayer(urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png'),
-                MarkerLayer(markers: [
-                  if (_shuttleLat != null && _shuttleLng != null)
-                    Marker(
-                      width: 48,
-                      height: 48,
-                      point: LatLng(_shuttleLat!, _shuttleLng!),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(Icons.directions_bus, color: Colors.yellow, size: 32),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                            decoration: BoxDecoration(color: Colors.yellow, borderRadius: BorderRadius.circular(6)),
-                            child: Text(_latestStatus ?? '-', style: const TextStyle(fontSize: 10, color: Colors.black)),
+            ),
+
+          // Map
+          Expanded(
+            child: (_shuttleLat != null && _shuttleLng != null)
+                ? FlutterMap(
+                    mapController: _mapController,
+                    options: MapOptions(
+                      initialCenter: LatLng(_shuttleLat!, _shuttleLng!),
+                      initialZoom: 14.0,
+                    ),
+                    children: [
+                      TileLayer(
+                        urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                        userAgentPackageName: 'com.example.shuttle_tracker',
+                      ),
+                      MarkerLayer(
+                        markers: [
+                          Marker(
+                            point: LatLng(_shuttleLat!, _shuttleLng!),
+                            width: 80,
+                            height: 80,
+                            child: const Icon(
+                              Icons.directions_bus,
+                              color: Colors.blue,
+                              size: 40,
+                            ),
                           ),
                         ],
                       ),
-                    ),
-                ]),
-              ],
-            ),
-          ),
-          const SizedBox(height: 8),
-          Expanded(
-            child: Stack(
-              children: [
-                // Existing placeholder area for map legend and shuttle info
-                Container(
-                  color: Colors.black,
-                  width: double.infinity,
-                  height: double.infinity,
-                  child: const Center(
-                    child: Text('[MapView Placeholder]', style: TextStyle(color: Colors.blueGrey, fontSize: 18)),
-                  ),
-                ),
-                // Dynamic shuttle info
-                Positioned(
-                  top: 24,
-                  left: 12,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Icon(Icons.directions_bus, color: _latestStatus != null ? Colors.yellow : Colors.white, size: 40),
-                      const SizedBox(height: 6),
-                      Text(_latestShuttleId != null ? 'Shuttle: ${_latestShuttleId!}' : 'Shuttle', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
-                      if (_shuttleLat != null && _shuttleLng != null) Text('Lat: ${_shuttleLat!.toStringAsFixed(5)}, Lng: ${_shuttleLng!.toStringAsFixed(5)}', style: const TextStyle(color: Colors.white70)),
                     ],
-                  ),
-                ),
-                // Persistent status banner when available
-                if (_latestStatus != null)
-                  Positioned(
-                    top: 80,
-                    left: 20,
-                    right: 20,
-                    child: Card(
-                      color: Colors.grey[900],
-                      elevation: 4,
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                        child: Row(
-                          children: [
-                            const Icon(Icons.info_outline, color: Colors.white70),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                '${_latestShuttleId ?? 'Shuttle'} — ${LocationStatusExtension.fromString(_latestStatus!).label}',
-                                style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
-                              ),
-                            ),
-                            TextButton(
-                              onPressed: () {
-                                setState(() => _latestStatus = null);
-                              },
-                              child: const Text('Dismiss'),
-                            )
-                          ],
-                        ),
-                      ),
+                  )
+                : const Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        CircularProgressIndicator(),
+                        SizedBox(height: 16),
+                        Text('Waiting for shuttle location...'),
+                      ],
                     ),
+                  ),
+          ),
+
+          // Info panel
+          Container(
+            padding: const EdgeInsets.all(16),
+            color: Colors.grey[900],
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (_latestShuttleId != null)
+                  Text(
+                    'Shuttle ID: $_latestShuttleId',
+                    style: const TextStyle(color: Colors.white, fontSize: 16),
+                  ),
+                if (_shuttleLat != null && _shuttleLng != null)
+                  Text(
+                    'Location: ${_shuttleLat!.toStringAsFixed(6)}, ${_shuttleLng!.toStringAsFixed(6)}',
+                    style: const TextStyle(color: Colors.white70, fontSize: 12),
+                  ),
+                if (_latestStatus != null)
+                  Text(
+                    'Status: ${_getStatusLabel(_latestStatus)}',
+                    style: const TextStyle(color: Colors.white70, fontSize: 14),
                   ),
               ],
             ),
@@ -251,4 +197,51 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
       ),
     );
   }
+
+  Color _getStatusColor(String? status) {
+    if (status == null) return Colors.grey;
+    switch (status.toUpperCase()) {
+      case 'LEAVING':
+      case 'DEPARTING_CAMPUS':
+        return Colors.orange;
+      case 'EN_ROUTE':
+      case 'ON_ROUTE_TO_RESIDENCE':
+        return Colors.blue;
+      case 'ALMOST_THERE':
+        return Colors.lightBlue;
+      case 'ARRIVED':
+      case 'AT_RESIDENCE':
+        return Colors.green;
+      case 'HEADING_BACK':
+      case 'RETURNING_TO_CAMPUS':
+        return Colors.purple;
+      default:
+        return Colors.grey;
+    }
+  }
+
+  String _getStatusLabel(String? status) {
+    if (status == null) return 'Unknown';
+    switch (status.toUpperCase()) {
+      case 'AT_CAMPUS':
+        return 'At Campus';
+      case 'LEAVING':
+      case 'DEPARTING_CAMPUS':
+        return 'Leaving Campus';
+      case 'EN_ROUTE':
+      case 'ON_ROUTE_TO_RESIDENCE':
+        return 'En Route';
+      case 'ALMOST_THERE':
+        return 'Almost There';
+      case 'ARRIVED':
+      case 'AT_RESIDENCE':
+        return 'Arrived';
+      case 'HEADING_BACK':
+      case 'RETURNING_TO_CAMPUS':
+        return 'Heading Back';
+      default:
+        return status;
+    }
+  }
 }
+

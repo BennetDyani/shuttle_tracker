@@ -696,7 +696,16 @@ class _ManageComplaintsScreenState extends State<ManageComplaintsScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Complaints Center'),
-        leading: Navigator.canPop(context) ? IconButton(icon: const Icon(Icons.arrow_back), onPressed: () => Navigator.pop(context)) : null,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () {
+            if (Navigator.canPop(context)) {
+              Navigator.pop(context);
+            } else {
+              Navigator.pushReplacementNamed(context, '/admin/dashboard');
+            }
+          },
+        ),
         actions: [
           IconButton(icon: const Icon(Icons.refresh), onPressed: _fetchComplaints, tooltip: 'Refresh'),
         ],

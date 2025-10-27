@@ -118,16 +118,25 @@ class _RegisterScreenState extends State<RegisterScreen> {
   }
 
   Widget _logo(BuildContext context) {
-    return CircleAvatar(
-      radius: 60,
-      // use withAlpha instead of deprecated withOpacity
-      backgroundColor: Theme.of(context).colorScheme.primary.withAlpha((0.1 * 255).round()),
-      child: Text(
-        'CPUT',
-        style: TextStyle(
-          color: Theme.of(context).colorScheme.primary,
-          fontWeight: FontWeight.bold,
-          fontSize: 22,
+    return Container(
+      width: 120,
+      height: 120,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: Colors.white,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.grey.withAlpha((0.3 * 255).round()),
+            spreadRadius: 2,
+            blurRadius: 5,
+          ),
+        ],
+      ),
+      padding: const EdgeInsets.all(12),
+      child: ClipOval(
+        child: Image.asset(
+          'assets/images/cput_logo.png',
+          fit: BoxFit.contain,
         ),
       ),
     );

@@ -1,144 +1,222 @@
-import 'package:shuttle_tracker/services/globals.dart' as globals;
-import 'package:shuttle_tracker/services/location_stomp_client.dart';
+import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/foundation.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:stomp_dart_client/stomp_dart_client.dart';
+import '../utils/platform_utils_stub.dart' if (dart.library.io) '../utils/platform_utils_io.dart';
 
-// High-level singleton service that configures and exposes the LocationStompClient
-// using values from globals.dart. Adjust globals to match your server.
-class LocationWsService {
-  static final LocationWsService _instance = LocationWsService._internal();
-  factory LocationWsService() => _instance;
-  LocationWsService._internal();
+class LocationWebSocketService {
+  StompClient? _stompClient;
+  Timer? _locationTimer;
+  bool _isConnected = false;
+  int? _currentDriverId;
+  int? _currentShuttleId;
 
-  LocationStompClient? _client;
-
-  Map<String, String>? _connHeaders() {
-    if (globals.authToken.trim().isEmpty) return null;
-    return {'Authorization': 'Bearer ${globals.authToken}'};
+  // WebSocket URL (adjust based on your backend)
+  String get _wsUrl {
+    final host = (PlatformUtils.isAndroid && !kIsWeb) ? '10.0.2.2' : 'localhost';
+    return 'ws://$host:8080/ws';
   }
 
-  LocationStompClient _ensureClient() {
-    if (_client == null) {
-      final wsUrl = LocationStompClient.buildWebSocketUrl(
-        globals.apiBaseUrl,
-        globals.wsEndpointPath, // e.g. '/ws' or '/stomp'
-      );
-      // Log the final websocket URL for debugging (helps diagnose 404 / upgrade errors)
-      debugPrint('LocationWsService: connecting to websocket URL -> $wsUrl');
-      _client = LocationStompClient(
-        websocketUrl: wsUrl,
-        appPrefix: globals.appDestinationPrefix,
-        topicPrefix: globals.topicDestinationPrefix,
-        connectionHeaders: _connHeaders(),
-      );
-    }
-    return _client!;
-  }
+  bool get isConnected => _isConnected;
 
-  bool get isConnected => _client?.isConnected == true;
-
-  void _setClient(LocationStompClient c) {
-    // replace existing client and clear previous
-    try {
-      _client?.disconnect();
-    } catch (_) {}
-    _client = c;
-  }
-
-  void connect({
-    void Function(dynamic frame)? onConnected,
-    void Function(Object error)? onError,
-  }) {
-    // Build candidate URLs to try (primary + fallbacks)
-    final primary = LocationStompClient.buildWebSocketUrl(globals.apiBaseUrl, globals.wsEndpointPath);
-
-    // derive host-only base (strip any path from apiBaseUrl)
-    Uri? parsed;
-    try {
-      parsed = Uri.parse(globals.apiBaseUrl);
-    } catch (_) {
-      parsed = null;
-    }
-    final hostOnly = (parsed == null)
-        ? null
-        : Uri(scheme: parsed.scheme, host: parsed.host, port: parsed.hasPort ? parsed.port : null).toString();
-
-    final alt1 = (hostOnly != null) ? LocationStompClient.buildWebSocketUrl(hostOnly, globals.wsEndpointPath) : null;
-    // also try '/websocket' suffix common with SockJS setups
-    final alt2 = (hostOnly != null) ? LocationStompClient.buildWebSocketUrl(hostOnly, '${globals.wsEndpointPath}/websocket') : null;
-    final alt3 = LocationStompClient.buildWebSocketUrl(globals.apiBaseUrl, '${globals.wsEndpointPath}/websocket');
-
-    final candidates = <String>[];
-    void addIf(String? u) {
-      if (u == null) return;
-      if (!candidates.contains(u)) candidates.add(u);
+  // Connect to WebSocket and start broadcasting location
+  void connect(int driverId, int shuttleId) {
+    if (_isConnected) {
+      debugPrint('[LocationWS] Already connected');
+      return;
     }
 
-    addIf(primary);
-    addIf(alt1);
-    addIf(alt2);
-    addIf(alt3);
+    _currentDriverId = driverId;
+    _currentShuttleId = shuttleId;
 
-    int idx = 0;
-    Object? lastErr;
+    debugPrint('[LocationWS] Connecting to $_wsUrl');
 
-    void tryNext() {
-      if (idx >= candidates.length) {
-        // All attempts failed
-        if (onError != null) onError(lastErr ?? Exception('Failed to connect to any websocket endpoint'));
-        return;
-      }
-      final url = candidates[idx++];
-      debugPrint('LocationWsService: attempting websocket connect -> $url');
-      final client = LocationStompClient(
-        websocketUrl: url,
-        appPrefix: globals.appDestinationPrefix,
-        topicPrefix: globals.topicDestinationPrefix,
-        connectionHeaders: _connHeaders(),
-      );
+    _stompClient = StompClient(
+      config: StompConfig.sockJS(
+        url: _wsUrl,
+        onConnect: _onConnect,
+        onWebSocketError: (dynamic error) {
+          debugPrint('[LocationWS] WebSocket Error: $error');
+          _isConnected = false;
+        },
+        onStompError: (StompFrame frame) {
+          debugPrint('[LocationWS] STOMP Error: ${frame.body}');
+        },
+        onDisconnect: (frame) {
+          debugPrint('[LocationWS] Disconnected');
+          _isConnected = false;
+          _stopLocationBroadcast();
+        },
+      ),
+    );
 
-      bool handled = false;
-      client.connect(onConnected: (frame) {
-        handled = true;
-        // adopt this client
-        _setClient(client);
-        debugPrint('LocationWsService: connected via -> $url');
-        onConnected?.call(frame);
-      }, onError: (err, [st]) {
-        if (handled) return; // ignore errors after connected
-        lastErr = err;
-        debugPrint('LocationWsService: connect failed for $url -> $err');
-        // try next candidate
-        tryNext();
-      });
-    }
-
-    tryNext();
+    _stompClient!.activate();
   }
 
-  void disconnect() {
-    _client?.disconnect();
-    _client = null;
+  // Called when WebSocket connection is established
+  void _onConnect(StompFrame frame) {
+    debugPrint('[LocationWS] Connected successfully');
+    _isConnected = true;
+
+    // Start broadcasting location every 5 seconds
+    _startLocationBroadcast();
   }
 
-  void subscribeToLocations(void Function(LocationMessageDto msg) onMessage) {
-    _ensureClient().subscribeToLocations(onMessage);
-  }
+  // Start periodic location updates
+  void _startLocationBroadcast() {
+    _stopLocationBroadcast(); // Stop any existing timer
 
-  void sendLocationUpdate({
-    required String driverId,
-    required String shuttleId,
-    required double latitude,
-    required double longitude,
-    String? timestampIso8601,
-    String? status,
-  }) {
-    _ensureClient().sendLocationUpdate(
-          driverId: driverId,
-          shuttleId: shuttleId,
-          latitude: latitude,
-          longitude: longitude,
-          timestampIso8601: timestampIso8601,
-          status: status,
+    _locationTimer = Timer.periodic(const Duration(seconds: 5), (timer) async {
+      try {
+        // Get current location
+        Position position = await Geolocator.getCurrentPosition(
+          desiredAccuracy: LocationAccuracy.high,
         );
+
+        // Send location update
+        _sendLocationUpdate(
+          _currentDriverId!,
+          _currentShuttleId!,
+          position.latitude,
+          position.longitude,
+        );
+      } catch (e) {
+        debugPrint('[LocationWS] Error getting location: $e');
+      }
+    });
+
+    debugPrint('[LocationWS] Location broadcasting started');
+  }
+
+  // Stop location broadcasting
+  void _stopLocationBroadcast() {
+    if (_locationTimer != null) {
+      _locationTimer!.cancel();
+      _locationTimer = null;
+      debugPrint('[LocationWS] Location broadcasting stopped');
+    }
+  }
+
+  // Send location update to server
+  void _sendLocationUpdate(int driverId, int shuttleId, double latitude, double longitude) {
+    if (!_isConnected || _stompClient == null) {
+      debugPrint('[LocationWS] Not connected, cannot send location');
+      return;
+    }
+
+    final message = jsonEncode({
+      'driverId': driverId,
+      'shuttleId': shuttleId,
+      'latitude': latitude,
+      'longitude': longitude,
+      'timestamp': DateTime.now().toIso8601String(),
+    });
+
+    try {
+      _stompClient!.send(
+        destination: '/app/location',
+        body: message,
+      );
+
+      debugPrint('[LocationWS] Location sent: lat=$latitude, lng=$longitude');
+    } catch (e) {
+      debugPrint('[LocationWS] Error sending location: $e');
+    }
+  }
+
+  // Send status update (leaving, almost there, arrived, etc.)
+  void sendStatusUpdate(int driverId, int shuttleId, double latitude, double longitude, String status) {
+    if (!_isConnected || _stompClient == null) {
+      debugPrint('[LocationWS] Not connected, cannot send status');
+      return;
+    }
+
+    final message = jsonEncode({
+      'driverId': driverId,
+      'shuttleId': shuttleId,
+      'latitude': latitude,
+      'longitude': longitude,
+      'status': status,
+      'timestamp': DateTime.now().toIso8601String(),
+    });
+
+    try {
+      _stompClient!.send(
+        destination: '/app/status',
+        body: message,
+      );
+
+      debugPrint('[LocationWS] Status update sent: $status');
+    } catch (e) {
+      debugPrint('[LocationWS] Error sending status: $e');
+    }
+  }
+
+  // Disconnect from WebSocket
+  void disconnect() {
+    debugPrint('[LocationWS] Disconnecting...');
+
+    _stopLocationBroadcast();
+
+    if (_stompClient != null) {
+      _stompClient!.deactivate();
+      _stompClient = null;
+    }
+
+    _isConnected = false;
+    _currentDriverId = null;
+    _currentShuttleId = null;
+
+    debugPrint('[LocationWS] Disconnected');
+  }
+
+  // Subscribe to location updates (for students)
+  void subscribeToShuttleLocation(int shuttleId, Function(Map<String, dynamic>) onLocationUpdate) {
+    if (!_isConnected || _stompClient == null) {
+      debugPrint('[LocationWS] Not connected, cannot subscribe');
+      return;
+    }
+
+    _stompClient!.subscribe(
+      destination: '/topic/shuttle/$shuttleId',
+      callback: (StompFrame frame) {
+        if (frame.body != null) {
+          try {
+            final data = jsonDecode(frame.body!);
+            onLocationUpdate(data);
+          } catch (e) {
+            debugPrint('[LocationWS] Error parsing location update: $e');
+          }
+        }
+      },
+    );
+
+    debugPrint('[LocationWS] Subscribed to shuttle $shuttleId updates');
+  }
+
+  // Subscribe to status updates (for students)
+  void subscribeToShuttleStatus(int shuttleId, Function(Map<String, dynamic>) onStatusUpdate) {
+    if (!_isConnected || _stompClient == null) {
+      debugPrint('[LocationWS] Not connected, cannot subscribe');
+      return;
+    }
+
+    _stompClient!.subscribe(
+      destination: '/topic/shuttle/$shuttleId/status',
+      callback: (StompFrame frame) {
+        if (frame.body != null) {
+          try {
+            final data = jsonDecode(frame.body!);
+            onStatusUpdate(data);
+          } catch (e) {
+            debugPrint('[LocationWS] Error parsing status update: $e');
+          }
+        }
+      },
+    );
+
+    debugPrint('[LocationWS] Subscribed to shuttle $shuttleId status updates');
   }
 }
+

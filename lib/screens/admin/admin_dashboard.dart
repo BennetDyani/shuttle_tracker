@@ -388,23 +388,24 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
     if (_selectedIndex == index) return;
     switch (index) {
       case 0:
-        Navigator.pushReplacementNamed(context, '/admin/dashboard');
-        break;
+        // Already on dashboard, do nothing
+        return;
       case 1:
-        Navigator.pushReplacementNamed(context, '/admin/users');
+        Navigator.pushNamed(context, '/admin/users');
         break;
       case 2:
-        Navigator.pushReplacementNamed(context, '/admin/shuttles');
+        Navigator.pushNamed(context, '/admin/shuttles');
         break;
       case 3:
         // Open Manage Schedules screen
-        Navigator.pushReplacementNamed(context, '/admin/schedules');
+        Navigator.pushNamed(context, '/admin/schedules');
         break;
       case 4:
-        Navigator.pushReplacementNamed(context, '/admin/profile');
+        Navigator.pushNamed(context, '/admin/profile');
         break;
       default:
-        Navigator.pushReplacementNamed(context, '/admin/dashboard');
+        // Already on dashboard, do nothing
+        return;
     }
   }
 
@@ -757,6 +758,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
       appBar: AppBar(
         backgroundColor: theme.colorScheme.primary,
         elevation: 1,
+        automaticallyImplyLeading: false,
         title: Text(_isLoadingName ? 'Admin Dashboard' : 'Hi, ${_displayName}', style: const TextStyle(fontWeight: FontWeight.bold)),
         iconTheme: IconThemeData(color: theme.colorScheme.onPrimary),
         actions: [

@@ -15,7 +15,13 @@ class AdminSelectRouteScreen extends StatelessWidget {
     if (args is Destination) dest = args;
 
     return Scaffold(
-      appBar: AppBar(title: Text('Select route')),
+      appBar: AppBar(
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () => Navigator.pop(context),
+        ),
+        title: const Text('Select route'),
+      ),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Column(
